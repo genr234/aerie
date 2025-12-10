@@ -1,0 +1,4 @@
+.zig-cache
+zig-out
+.idea
+.idea_modules/
