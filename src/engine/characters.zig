@@ -28,9 +28,11 @@ pub const Player = struct {
     pub fn update(self: *Player, deltaTime: f32) void {
         if (rl.isKeyDown(.right)) {
             self.sprite.x += self.speed * deltaTime;
+            self.sprite.scale = -1.0;
         }
         if (rl.isKeyDown(.left)) {
             self.sprite.x -= self.speed * deltaTime;
+            self.sprite.scale = 1.0;
         }
         if (rl.isKeyDown(.up)) {
             self.sprite.y -= self.speed * deltaTime;
@@ -47,8 +49,21 @@ pub const Player = struct {
         if (self.sprite.x < 0) self.sprite.x = 0;
         if (self.sprite.y < 0) self.sprite.y = 0;
 
+        var target = rl.Vector2{
+            .x = self.sprite.x + spriteW / 2,
+            .y = self.sprite.y + spriteH / 2,
+        };
+
+        const halfW: f32 = self.scene.camera.offset.x / self.scene.camera.zoom;
+        const halfH: f32 = self.scene.camera.offset.y / self.scene.camera.zoom;
+
+        if (target.x < halfW) target.x = halfW;
+        if (target.y < halfH) target.y = halfH;
         if (self.sprite.x + spriteW > sceneW) self.sprite.x = sceneW - spriteW;
         if (self.sprite.y + spriteH > sceneH) self.sprite.y = sceneH - spriteH;
+
+
+        self.scene.camera.target = target;
 
         self.draw();
     }

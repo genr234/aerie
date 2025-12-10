@@ -13,3 +13,7 @@ pub fn bufferedPrint() !void {
 
     try stdout.flush(); // Don't forget to flush!
 }
+
+pub inline fn F32(int: anytype) f32 {
+    return @floatFromInt(int);
+}
