@@ -1,5 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
+const gameobjects = @import("gameobjects.zig");
 
 pub const Scene = struct {
     width: i32 = 800,
@@ -16,6 +17,11 @@ pub const Scene = struct {
     onExit: ?*const fn (scene: *Scene) void = null,
     message: ?[:0]const u8 = null,
     messageTimer: f32 = 0.0,
+
+    // Scene game objects
+    gameObjects: gameobjects.SceneGameObjects = gameobjects.SceneGameObjects.init(),
+
+    const Self = @This();
 
     pub fn init(
         width: i32,
@@ -40,7 +46,36 @@ pub const Scene = struct {
             .onExit = onExit,
             .message = null,
             .messageTimer = 0.0,
+            .gameObjects = gameobjects.SceneGameObjects.init(),
         };
+    }
+
+    pub fn addGameObject(self: *Self, go: gameobjects.GameObject) ?usize {
+        return self.gameObjects.addGameObject(go);
+    }
+
+    pub fn getGameObject(self: *Self, index: usize) ?*gameobjects.GameObject {
+        return self.gameObjects.getGameObject(index);
+    }
+
+    pub fn getGameObjectByTag(self: *Self, tag: []const u8) ?*gameobjects.GameObject {
+        return self.gameObjects.getGameObjectByTag(tag);
+    }
+
+    pub fn removeGameObject(self: *Self, index: usize) void {
+        self.gameObjects.removeGameObject(index);
+    }
+
+    pub fn checkGameObjectTriggers(self: *Self, playerRect: rl.Rectangle) void {
+        self.gameObjects.checkAllTriggersWithPlayer(playerRect, self);
+    }
+
+    pub fn drawGameObjects(self: *Self) void {
+        self.gameObjects.draw();
+    }
+
+    pub fn clearGameObjects(self: *Self) void {
+        self.gameObjects.clear();
     }
 
     // pub fn setup(self: *Scene) void {}

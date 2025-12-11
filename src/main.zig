@@ -3,6 +3,7 @@ const std = @import("std");
 const characters = @import("engine/characters.zig");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
+const gameobjects = @import("engine/gameobjects.zig");
 const root = @import("root.zig");
 
 pub fn main() anyerror!void {
@@ -31,19 +32,42 @@ pub fn main() anyerror!void {
         .y = root.F32(screenHeight) / 2.0,
     };
 
-    var player = try characters.Player.init(playerTexture, cs, screenWidth / 2, screenHeight / 2);
+    // Add origin circle GameObject
+    var circleGo = gameobjects.GameObject.init("origin_circle", gameobjects.GameObjectData{
+        .circle = .{
+            .radius = 4,
+            .color = rl.Color.blue,
+        },
+    });
+    circleGo.position = rl.Vector2{ .x = 15, .y = 15 };
+    _ = cs.addGameObject(circleGo);
 
+    // Add trigger zone rectangle GameObject
+    var triggerGo = gameobjects.GameObject.init("trigger_zone", gameobjects.GameObjectData{
+        .rectangle = .{
+            .width = 50,
+            .height = 50,
+            .color = rl.Color.green,
+        },
+    });
+    triggerGo.position = rl.Vector2{ .x = 300, .y = 200 };
+
+    // Add trigger to the GameObject
     var dialogueLines = [_][]const u8{
         "Welcome!",
         "Press SPACE to continue.",
     };
     var gameDialogue = dialogue.Dialogue.init(&dialogueLines, "Narrator");
-    try player.addTrigger(rl.Rectangle{
+    triggerGo.addTrigger(rl.Rectangle{
         .x = 300,
         .y = 200,
         .width = 50,
         .height = 50,
-    }, characters.TriggerAction{ .start_dialogue = &gameDialogue });
+    }, gameobjects.TriggerAction{ .start_dialogue = &gameDialogue });
+
+    _ = cs.addGameObject(triggerGo);
+
+    var player = try characters.Player.init(playerTexture, cs, screenWidth / 2, screenHeight / 2);
 
     // Main game loop
     while (!rl.windowShouldClose()) {
@@ -71,10 +95,23 @@ pub fn main() anyerror!void {
 
         // Update and render game
         rl.beginMode2D(manager.currentScene().camera);
-        rl.drawCircle(15, 15, 4, .blue);
-        rl.drawRectangle(300, 200, 50, 50, .green);
+
+        // Draw all scene GameObjects
+        manager.currentScene().drawGameObjects();
 
         try player.update(deltaTime, gameDialogue.active);
+
+        // Check triggers on all GameObjects with player rectangle
+        const spriteW: f32 = @floatFromInt(player.texture.width);
+        const spriteH: f32 = @floatFromInt(player.texture.height);
+        const absScale = if (player.sprite.scale < 0.0) -player.sprite.scale else player.sprite.scale;
+        const playerRec = rl.Rectangle{
+            .x = player.sprite.x,
+            .y = player.sprite.y,
+            .width = spriteW * absScale,
+            .height = spriteH * absScale,
+        };
+        manager.currentScene().checkGameObjectTriggers(playerRec);
 
         manager.currentScene().camera.target = rl.Vector2{
             .x = player.sprite.x + root.F32(player.texture.width) / 2.0,
