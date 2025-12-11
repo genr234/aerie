@@ -9,6 +9,8 @@ pub const Scene = struct {
         .rotation = 0.0,
         .zoom = 1.0,
     },
+    message: ?[:0]const u8 = null,
+    messageTimer: f32 = 0.0,
 
     pub fn init(width: i32, height: i32) Scene {
         return Scene{
@@ -20,6 +22,8 @@ pub const Scene = struct {
                 .rotation = 0.0,
                 .zoom = 1.0,
             },
+            .message = null,
+            .messageTimer = 0.0,
         };
     }
 

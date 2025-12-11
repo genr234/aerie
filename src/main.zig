@@ -20,9 +20,15 @@ pub fn main() anyerror!void {
         .x = root.F32(screenWidth) / 2.0,
         .y = root.F32(screenHeight) / 2.0,
     };
-    
-    var player = characters.Player.init(playerTexture, scene, screenWidth / 2, screenHeight / 2);
 
+    var player = try characters.Player.init(playerTexture, &scene, screenWidth / 2, screenHeight / 2);
+
+    try player.addTrigger(rl.Rectangle{
+        .x = 300,
+        .y = 200,
+        .width = 50,
+        .height = 50,
+    }, characters.TriggerAction{ .print_message = "Collision!" });
 
     // Main game loop
     while (!rl.windowShouldClose()) {
@@ -31,14 +37,28 @@ pub fn main() anyerror!void {
 
         rl.beginMode2D(scene.camera);
         rl.drawCircle(15, 15, 4, .blue);
+        rl.drawRectangle(300, 200, 50, 50, .green);
 
-        player.update(rl.getFrameTime());
+        try player.update(rl.getFrameTime());
         scene.camera.target = rl.Vector2{
             .x = player.sprite.x + root.F32(player.texture.width) / 2.0,
             .y = player.sprite.y + root.F32(player.texture.height) / 2.0,
         };
 
         rl.endMode2D();
+
+        // update and render scene message (in screen coordinates, outside camera transform)
+        if (scene.messageTimer > 0.0) {
+            if (scene.message) |msg| {
+                rl.drawText(msg, 10, 10, 20, .red);
+            }
+            scene.messageTimer -= rl.getFrameTime();
+            if (scene.messageTimer <= 0.0) {
+                scene.message = null;
+                scene.messageTimer = 0.0;
+            }
+        }
+
         rl.endDrawing();
     }
 }
