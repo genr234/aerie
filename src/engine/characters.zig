@@ -52,20 +52,22 @@ pub const Player = struct {
 
     // pub fn deinit(self: *Player) void {}
 
-    pub fn update(self: *Player, deltaTime: f32) !void {
-        if (rl.isKeyDown(.right)) {
-            self.sprite.x += self.speed * deltaTime;
-            self.sprite.scale = -1.0;
-        }
-        if (rl.isKeyDown(.left)) {
-            self.sprite.x -= self.speed * deltaTime;
-            self.sprite.scale = 1.0;
-        }
-        if (rl.isKeyDown(.up)) {
-            self.sprite.y -= self.speed * deltaTime;
-        }
-        if (rl.isKeyDown(.down)) {
-            self.sprite.y += self.speed * deltaTime;
+    pub fn update(self: *Player, deltaTime: f32, paused: bool) !void {
+        if (!paused) {
+            if (rl.isKeyDown(.right)) {
+                self.sprite.x += self.speed * deltaTime;
+                self.sprite.scale = -1.0;
+            }
+            if (rl.isKeyDown(.left)) {
+                self.sprite.x -= self.speed * deltaTime;
+                self.sprite.scale = 1.0;
+            }
+            if (rl.isKeyDown(.up)) {
+                self.sprite.y -= self.speed * deltaTime;
+            }
+            if (rl.isKeyDown(.down)) {
+                self.sprite.y += self.speed * deltaTime;
+            }
         }
 
         const spriteW: f32 = @floatFromInt(self.texture.width);
