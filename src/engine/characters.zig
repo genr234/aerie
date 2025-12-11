@@ -1,19 +1,19 @@
 const std = @import("std");
 const sprites = @import("sprites.zig");
 const scenes = @import("scenes.zig");
+const dialogue = @import("dialogue.zig");
 
 const rl = @import("raylib");
 
 const MAX_TRIGGERS: usize = 32;
 const TriggerError = error{TooManyTriggers};
 
-pub const TriggerAction = union(enum) {
-    print_message: [:0]const u8,
-};
+pub const TriggerAction = union(enum) { print_message: [:0]const u8, start_dialogue: *dialogue.Dialogue };
 
 const Trigger = struct {
     rectangle: rl.Rectangle,
     action: TriggerAction,
+    was_inside: bool,
 };
 
 pub const Player = struct {
@@ -95,7 +95,6 @@ pub const Player = struct {
         if (self.sprite.x + spriteW > sceneW) self.sprite.x = sceneW - spriteW;
         if (self.sprite.y + spriteH > sceneH) self.sprite.y = sceneH - spriteH;
 
-
         self.scene.camera.target = target;
 
         self.checkTriggers();
@@ -105,7 +104,7 @@ pub const Player = struct {
 
     pub fn addTrigger(self: *Player, rectangle: rl.Rectangle, action: TriggerAction) !void {
         if (self.triggers_count >= MAX_TRIGGERS) return TriggerError.TooManyTriggers;
-        self.triggers[self.triggers_count] = Trigger{ .rectangle = rectangle, .action = action };
+        self.triggers[self.triggers_count] = Trigger{ .rectangle = rectangle, .action = action, .was_inside = false };
         self.triggers_count += 1;
     }
 
@@ -123,15 +122,23 @@ pub const Player = struct {
 
         var i: usize = 0;
         while (i < self.triggers_count) : (i += 1) {
-            const t = &self.triggers[i];
-            if (rl.checkCollisionRecs(playerRec, t.rectangle)) {
-                // execute the action
-                switch (t.action) {
-                    .print_message => |msg| {
-                        self.scene.message = msg;
-                        self.scene.messageTimer = 2.0; // show for 2 seconds
-                    },
+            var t = &self.triggers[i];
+            const inside = rl.checkCollisionRecs(playerRec, t.rectangle);
+            if (inside) {
+                if (!t.was_inside) {
+                    switch (t.action) {
+                        .print_message => |msg| {
+                            self.scene.message = msg;
+                            self.scene.messageTimer = 2.0; // show for 2 seconds
+                        },
+                        .start_dialogue => |dlg| {
+                            dlg.start();
+                        },
+                    }
                 }
+                t.was_inside = true;
+            } else {
+                t.was_inside = false;
             }
         }
     }
