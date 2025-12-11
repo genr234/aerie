@@ -5,7 +5,7 @@ const dialogue = @import("dialogue.zig");
 
 const rl = @import("raylib");
 
-const MAX_TRIGGERS: usize = 32;
+const MAX_TRIGGERS: usize = 64;
 const TriggerError = error{TooManyTriggers};
 
 pub const TriggerAction = union(enum) { print_message: [:0]const u8, start_dialogue: *dialogue.Dialogue };

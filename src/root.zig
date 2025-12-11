@@ -17,3 +17,7 @@ pub fn bufferedPrint() !void {
 pub inline fn F32(int: anytype) f32 {
     return @floatFromInt(int);
 }
+
+pub inline fn I32(float: anytype) i32 {
+    return @intFromFloat(float);
+}

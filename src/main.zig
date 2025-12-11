@@ -37,7 +37,7 @@ pub fn main() anyerror!void {
         "Welcome!",
         "Press SPACE to continue.",
     };
-    var gameDialogue = dialogue.Dialogue.init(&dialogueLines);
+    var gameDialogue = dialogue.Dialogue.init(&dialogueLines, "Narrator");
     try player.addTrigger(rl.Rectangle{
         .x = 300,
         .y = 200,
