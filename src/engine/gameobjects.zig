@@ -78,6 +78,75 @@ pub const GameObject = struct {
             }
         }
     }
+
+    pub fn updatePlayer(self: *Self, deltaTime: f32, paused: bool, scene: *@import("scenes.zig").Scene) void {
+        if (self.data != .player) return;
+
+        var player = &self.data.player;
+        const spriteW: f32 = @floatFromInt(player.texture.width);
+        const spriteH: f32 = @floatFromInt(player.texture.height);
+        const sceneW: f32 = @floatFromInt(scene.width);
+        const sceneH: f32 = @floatFromInt(scene.height);
+
+        if (!paused) {
+            if (rl.isKeyDown(.right)) {
+                player.sprite.x += player.speed * deltaTime;
+                player.sprite.scale = -1.0;
+            }
+            if (rl.isKeyDown(.left)) {
+                player.sprite.x -= player.speed * deltaTime;
+                player.sprite.scale = 1.0;
+            }
+            if (rl.isKeyDown(.up)) {
+                player.sprite.y -= player.speed * deltaTime;
+            }
+            if (rl.isKeyDown(.down)) {
+                player.sprite.y += player.speed * deltaTime;
+            }
+        }
+
+        if (player.sprite.x < 0) player.sprite.x = 0;
+        if (player.sprite.y < 0) player.sprite.y = 0;
+        if (player.sprite.x + spriteW > sceneW) player.sprite.x = sceneW - spriteW;
+        if (player.sprite.y + spriteH > sceneH) player.sprite.y = sceneH - spriteH;
+
+        self.position = rl.Vector2{ .x = player.sprite.x, .y = player.sprite.y };
+        player.scale = player.sprite.scale;
+    }
+
+    pub fn getPlayerRect(self: *const Self) rl.Rectangle {
+        if (self.data != .player) {
+            return rl.Rectangle{ .x = 0, .y = 0, .width = 0, .height = 0 };
+        }
+
+        const player = self.data.player;
+        const spriteW: f32 = @floatFromInt(player.texture.width);
+        const spriteH: f32 = @floatFromInt(player.texture.height);
+        const absScale = if (player.scale < 0.0) -player.scale else player.scale;
+
+        return rl.Rectangle{
+            .x = player.sprite.x,
+            .y = player.sprite.y,
+            .width = spriteW * absScale,
+            .height = spriteH * absScale,
+        };
+    }
+
+    pub fn updateCamera(self: *Self, newTarget: rl.Vector2) void {
+        if (self.data != .camera) return;
+        self.data.camera.target = newTarget;
+    }
+
+    pub fn getCamera(self: *const Self) ?rl.Camera2D {
+        if (self.data != .camera) return null;
+        const cam = self.data.camera;
+        return rl.Camera2D{
+            .offset = cam.offset,
+            .target = cam.target,
+            .rotation = cam.rotation,
+            .zoom = cam.zoom,
+        };
+    }
 };
 
 pub const GameObjectData = union(enum) {
@@ -93,6 +162,18 @@ pub const GameObjectData = union(enum) {
     sprite: struct {
         texture: rl.Texture2D,
         scale: f32 = 1.0,
+    },
+    player: struct {
+        texture: rl.Texture2D,
+        speed: f32 = 100,
+        sprite: sprites.Sprite,
+        scale: f32 = 1.0,
+    },
+    camera: struct {
+        offset: rl.Vector2,
+        target: rl.Vector2,
+        rotation: f32 = 0.0,
+        zoom: f32 = 1.0,
     },
 };
 
@@ -146,6 +227,41 @@ pub const SceneGameObjects = struct {
         }
     }
 
+    pub fn updatePlayer(self: *Self, deltaTime: f32, paused: bool, scene: *@import("scenes.zig").Scene) void {
+        for (0..self.count) |i| {
+            const go = &self.gameObjects[i];
+            if (!go.active or go.data != .player) continue;
+            go.updatePlayer(deltaTime, paused, scene);
+        }
+    }
+
+    pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
+        for (0..self.count) |i| {
+            const go = &self.gameObjects[i];
+            if (!go.active or go.data != .player) continue;
+            return go.getPlayerRect();
+        }
+        return null;
+    }
+
+    pub fn getCamera(self: *Self) ?rl.Camera2D {
+        for (0..self.count) |i| {
+            const go = &self.gameObjects[i];
+            if (!go.active or go.data != .camera) continue;
+            return go.getCamera();
+        }
+        return null;
+    }
+
+    pub fn updateCamera(self: *Self, newTarget: rl.Vector2) void {
+        for (0..self.count) |i| {
+            const go = &self.gameObjects[i];
+            if (!go.active or go.data != .camera) continue;
+            go.updateCamera(newTarget);
+            break;
+        }
+    }
+
     pub fn draw(self: *Self) void {
         for (0..self.count) |i| {
             const go = &self.gameObjects[i];
@@ -161,6 +277,30 @@ pub const SceneGameObjects = struct {
                 .sprite => |spr| {
                     rl.drawTextureEx(spr.texture, go.position, 0.0, spr.scale, rl.Color.white);
                 },
+                .player => |plr| {
+                    const spriteW: f32 = @floatFromInt(plr.texture.width);
+                    const spriteH: f32 = @floatFromInt(plr.texture.height);
+
+                    // flip source horizontally when scale is negative
+                    const src = rl.Rectangle{
+                        .x = if (plr.scale < 0.0) spriteW else 0.0,
+                        .y = 0.0,
+                        .width = if (plr.scale < 0.0) -spriteW else spriteW,
+                        .height = spriteH,
+                    };
+
+                    const absScale = if (plr.scale < 0.0) -plr.scale else plr.scale;
+                    const dest = rl.Rectangle{
+                        .x = go.position.x,
+                        .y = go.position.y,
+                        .width = spriteW * absScale,
+                        .height = spriteH * absScale,
+                    };
+
+                    const origin = rl.Vector2{ .x = 0.0, .y = 0.0 };
+                    rl.drawTexturePro(plr.texture, src, dest, origin, 0.0, .white);
+                },
+                .camera => |_| {  }
             }
         }
     }

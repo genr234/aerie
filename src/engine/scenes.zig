@@ -70,6 +70,22 @@ pub const Scene = struct {
         self.gameObjects.checkAllTriggersWithPlayer(playerRect, self);
     }
 
+    pub fn updateGameObjectPlayer(self: *Self, deltaTime: f32, paused: bool) void {
+        self.gameObjects.updatePlayer(deltaTime, paused, self);
+    }
+
+    pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
+        return self.gameObjects.getPlayerRect();
+    }
+
+    pub fn getGameObjectCamera(self: *Self) ?rl.Camera2D {
+        return self.gameObjects.getCamera();
+    }
+
+    pub fn updateGameObjectCamera(self: *Self, newTarget: rl.Vector2) void {
+        self.gameObjects.updateCamera(newTarget);
+    }
+
     pub fn drawGameObjects(self: *Self) void {
         self.gameObjects.draw();
     }

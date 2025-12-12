@@ -4,6 +4,7 @@ const characters = @import("engine/characters.zig");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
 const gameobjects = @import("engine/gameobjects.zig");
+const sprites = @import("engine/sprites.zig");
 const root = @import("root.zig");
 
 pub fn main() anyerror!void {
@@ -27,10 +28,19 @@ pub fn main() anyerror!void {
 
     var cs = &manager.scenes[0];
     cs.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
-    cs.camera.offset = rl.Vector2{
-        .x = root.F32(screenWidth) / 2.0,
-        .y = root.F32(screenHeight) / 2.0,
-    };
+
+    const cameraGo = gameobjects.GameObject.init("main_camera", gameobjects.GameObjectData{
+        .camera = .{
+            .offset = rl.Vector2{
+                .x = root.F32(screenWidth) / 2.0,
+                .y = root.F32(screenHeight) / 2.0,
+            },
+            .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
+            .rotation = 0.0,
+            .zoom = 1.0,
+        },
+    });
+    _ = cs.addGameObject(cameraGo);
 
     // Add origin circle GameObject
     var circleGo = gameobjects.GameObject.init("origin_circle", gameobjects.GameObjectData{
@@ -67,7 +77,22 @@ pub fn main() anyerror!void {
 
     _ = cs.addGameObject(triggerGo);
 
-    var player = try characters.Player.init(playerTexture, cs, screenWidth / 2, screenHeight / 2);
+    // Add player as a GameObject
+    const playerSprite = sprites.Sprite{
+        .texture = playerTexture,
+        .x = root.F32(screenWidth) / 2.0,
+        .y = root.F32(screenHeight) / 2.0,
+    };
+    var playerGo = gameobjects.GameObject.init("player", gameobjects.GameObjectData{
+        .player = .{
+            .texture = playerTexture,
+            .speed = 100,
+            .sprite = playerSprite,
+            .scale = 1.0,
+        },
+    });
+    playerGo.position = rl.Vector2{ .x = root.F32(screenWidth) / 2.0, .y = root.F32(screenHeight) / 2.0 };
+    _ = cs.addGameObject(playerGo);
 
     // Main game loop
     while (!rl.windowShouldClose()) {
@@ -83,40 +108,56 @@ pub fn main() anyerror!void {
         if (rl.isKeyPressed(.r)) {
             var ns = &manager.scenes[1];
             ns.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
-            ns.camera.offset = rl.Vector2{
-                .x = root.F32(screenWidth) / 2.0,
-                .y = root.F32(screenHeight) / 2.0,
-            };
+
+            // Create camera as a GameObject
+            const newCameraGo = gameobjects.GameObject.init("main_camera", gameobjects.GameObjectData{
+                .camera = .{
+                    .offset = rl.Vector2{
+                        .x = root.F32(screenWidth) / 2.0,
+                        .y = root.F32(screenHeight) / 2.0,
+                    },
+                    .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
+                    .rotation = 0.0,
+                    .zoom = 1.0,
+                },
+            });
+            _ = ns.addGameObject(newCameraGo);
+
             manager.changeScene(1);
         }
 
         rl.beginDrawing();
         rl.clearBackground(.white);
 
+        var currentCamera = manager.currentScene().getGameObjectCamera() orelse manager.currentScene().camera;
         // Update and render game
-        rl.beginMode2D(manager.currentScene().camera);
+        rl.beginMode2D(currentCamera);
 
         // Draw all scene GameObjects
         manager.currentScene().drawGameObjects();
 
-        try player.update(deltaTime, gameDialogue.active);
+        // Update player through the scene
+        manager.currentScene().updateGameObjectPlayer(deltaTime, gameDialogue.active);
 
         // Check triggers on all GameObjects with player rectangle
-        const spriteW: f32 = @floatFromInt(player.texture.width);
-        const spriteH: f32 = @floatFromInt(player.texture.height);
-        const absScale = if (player.sprite.scale < 0.0) -player.sprite.scale else player.sprite.scale;
-        const playerRec = rl.Rectangle{
-            .x = player.sprite.x,
-            .y = player.sprite.y,
-            .width = spriteW * absScale,
-            .height = spriteH * absScale,
-        };
-        manager.currentScene().checkGameObjectTriggers(playerRec);
+        if (manager.currentScene().getPlayerRect()) |playerRect| {
+            manager.currentScene().checkGameObjectTriggers(playerRect);
 
-        manager.currentScene().camera.target = rl.Vector2{
-            .x = player.sprite.x + root.F32(player.texture.width) / 2.0,
-            .y = player.sprite.y + root.F32(player.texture.height) / 2.0,
-        };
+            // Update camera target based on player position
+            const player = manager.currentScene().getGameObjectByTag("player");
+            if (player) |pg| {
+                const spriteW: f32 = @floatFromInt(pg.data.player.texture.width);
+                const spriteH: f32 = @floatFromInt(pg.data.player.texture.height);
+                const targetPos = rl.Vector2{
+                    .x = pg.position.x + spriteW / 2.0,
+                    .y = pg.position.y + spriteH / 2.0,
+                };
+                manager.currentScene().updateGameObjectCamera(targetPos);
+
+                // Update the current camera variable for rendering
+                currentCamera = manager.currentScene().getGameObjectCamera() orelse currentCamera;
+            }
+        }
 
         rl.endMode2D();
 
