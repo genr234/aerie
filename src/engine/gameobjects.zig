@@ -262,6 +262,15 @@ pub const SceneGameObjects = struct {
         }
     }
 
+    pub fn updateCameraZoom(self: *Self, zoomValue: f32) void {
+        for (0..self.count) |i| {
+            const go = &self.gameObjects[i];
+            if (!go.active or go.data != .camera) continue;
+            go.data.camera.zoom = zoomValue;
+            break;
+        }
+    }
+
     pub fn draw(self: *Self) void {
         for (0..self.count) |i| {
             const go = &self.gameObjects[i];

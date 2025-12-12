@@ -7,6 +7,14 @@ const gameobjects = @import("engine/gameobjects.zig");
 const sprites = @import("engine/sprites.zig");
 const root = @import("root.zig");
 
+fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) void {
+    _ = scene;
+    // Duplicate objects to new scene, will be cleaned up after scene loads
+    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "player");
+    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "main_camera");
+    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "origin_circle");
+}
+
 pub fn main() anyerror!void {
     const screenWidth = 800;
     const screenHeight = 450;
@@ -28,6 +36,7 @@ pub fn main() anyerror!void {
 
     var cs = &manager.scenes[0];
     cs.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
+    cs.onTransition = onSceneTransition;
 
     const cameraGo = gameobjects.GameObject.init("main_camera", gameobjects.GameObjectData{
         .camera = .{
@@ -108,21 +117,7 @@ pub fn main() anyerror!void {
         if (rl.isKeyPressed(.r)) {
             var ns = &manager.scenes[1];
             ns.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
-
-            // Create camera as a GameObject
-            const newCameraGo = gameobjects.GameObject.init("main_camera", gameobjects.GameObjectData{
-                .camera = .{
-                    .offset = rl.Vector2{
-                        .x = root.F32(screenWidth) / 2.0,
-                        .y = root.F32(screenHeight) / 2.0,
-                    },
-                    .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
-                    .rotation = 0.0,
-                    .zoom = 1.0,
-                },
-            });
-            _ = ns.addGameObject(newCameraGo);
-
+            ns.onTransition = onSceneTransition;
             manager.changeScene(1);
         }
 

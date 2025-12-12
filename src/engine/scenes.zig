@@ -15,6 +15,7 @@ pub const Scene = struct {
     draw: ?*const fn (scene: *Scene) void = null,
     onEnter: ?*const fn (scene: *Scene) void = null,
     onExit: ?*const fn (scene: *Scene) void = null,
+    onTransition: ?*const fn (scene: *Scene, manager: *SceneManager, toSceneIndex: usize) void = null,
     message: ?[:0]const u8 = null,
     messageTimer: f32 = 0.0,
 
@@ -44,6 +45,7 @@ pub const Scene = struct {
             .draw = draw,
             .onEnter = onEnter,
             .onExit = onExit,
+            .onTransition = null,
             .message = null,
             .messageTimer = 0.0,
             .gameObjects = gameobjects.SceneGameObjects.init(),
@@ -122,6 +124,12 @@ pub const SceneManager = struct {
     transitionDuration: f32 = 0.4,
     transitionNextIndex: ?usize = null,
     inputBlocked: bool = false,
+    zoomTarget: f32 = 1.0,
+    zoomStart: f32 = 1.0,
+
+    // Track objects to cleanup from old scene after transition
+    objectsToCleanup: [64][]const u8 = undefined,
+    cleanupCount: usize = 0,
 
     // initialize with an external buffer (caller must ensure buffer outlives manager)
     pub fn initStatic(scenes: []Scene) SceneManager {
@@ -138,6 +146,10 @@ pub const SceneManager = struct {
             .transitionDuration = 0.4,
             .transitionNextIndex = null,
             .inputBlocked = false,
+            .zoomTarget = 1.0,
+            .zoomStart = 1.0,
+            .objectsToCleanup = undefined,
+            .cleanupCount = 0,
         };
     }
 
@@ -164,6 +176,10 @@ pub const SceneManager = struct {
             .transitionDuration = 0.4,
             .transitionNextIndex = null,
             .inputBlocked = false,
+            .zoomTarget = 1.0,
+            .zoomStart = 1.0,
+            .objectsToCleanup = undefined,
+            .cleanupCount = 0,
         };
     }
 
@@ -183,6 +199,9 @@ pub const SceneManager = struct {
             self.transitionTimer = 0.0;
             self.transitionNextIndex = null;
             self.inputBlocked = false;
+            self.zoomTarget = 1.0;
+            self.zoomStart = 1.0;
+            self.cleanupCount = 0;
         }
     }
 
@@ -197,6 +216,20 @@ pub const SceneManager = struct {
     fn startTransition(self: *SceneManager, index: usize) void {
         if (index >= self.scenes.len) return;
         if (self.transitionState != TransitionState.None) return;
+        const cs = &self.scenes[self.currentIndex];
+        if (cs.getGameObjectCamera()) |cam| {
+            self.zoomStart = cam.zoom;
+        } else {
+            self.zoomStart = 1.0;
+        }
+
+        self.cleanupCount = 0;
+
+        if (cs.onTransition) |ot| {
+            ot(cs, self, index);
+        }
+
+        self.zoomTarget = 1.5;
         self.transitionNextIndex = index;
         self.transitionState = TransitionState.FadingOut;
         self.transitionTimer = 0.0;
@@ -247,6 +280,53 @@ pub const SceneManager = struct {
         }
     }
 
+    pub fn transferGameObjectByIndex(self: *SceneManager, fromScene: usize, toScene: usize, objectIndex: usize) bool {
+        if (fromScene >= self.scenes.len or toScene >= self.scenes.len) return false;
+        if (fromScene == toScene) return false;
+        if (objectIndex >= self.scenes[fromScene].gameObjects.count) return false;
+
+        const go = self.scenes[fromScene].getGameObject(objectIndex);
+        if (go) |obj| {
+            _ = self.scenes[toScene].addGameObject(obj.*);
+            if (self.cleanupCount < self.objectsToCleanup.len) {
+                self.objectsToCleanup[self.cleanupCount] = obj.getTag();
+                self.cleanupCount += 1;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    pub fn transferGameObject(self: *SceneManager, fromScene: usize, toScene: usize, objectTag: []const u8) bool {
+        if (fromScene >= self.scenes.len or toScene >= self.scenes.len) return false;
+        if (fromScene == toScene) return false;
+
+        const go = self.scenes[fromScene].getGameObjectByTag(objectTag);
+        if (go) |obj| {
+            _ = self.scenes[toScene].addGameObject(obj.*);
+            if (self.cleanupCount < self.objectsToCleanup.len) {
+                self.objectsToCleanup[self.cleanupCount] = objectTag;
+                self.cleanupCount += 1;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    pub fn cleanupTransferredObjects(self: *SceneManager, fromSceneIndex: usize) void {
+        for (0..self.cleanupCount) |i| {
+            const tag = self.objectsToCleanup[i];
+            // Find and remove the object by tag from the source scene
+            for (0..self.scenes[fromSceneIndex].gameObjects.count) |j| {
+                if (std.mem.eql(u8, self.scenes[fromSceneIndex].gameObjects.gameObjects[j].getTag(), tag)) {
+                    self.scenes[fromSceneIndex].removeGameObject(j);
+                    break;
+                }
+            }
+        }
+        self.cleanupCount = 0;
+    }
+
     pub fn update(self: *SceneManager, deltaTime: f32) void {
         if (self.transitionState == TransitionState.None) {
             const cs = self.currentScene();
@@ -257,17 +337,27 @@ pub const SceneManager = struct {
         self.transitionTimer += deltaTime;
         const dur = self.transitionDuration;
         if (self.transitionState == TransitionState.FadingOut) {
+            // Apply zoom during fade out
+            const progress = std.math.clamp(self.transitionTimer / dur, 0.0, 1.0);
+            const zoomValue = std.math.lerp(self.zoomStart, self.zoomTarget, progress);
+
+            const cs = self.currentScene();
+            if (cs.gameObjects.getCamera()) |_| {
+                cs.gameObjects.updateCameraZoom(zoomValue);
+            }
+
             if (self.transitionTimer >= dur) {
                 const old = self.currentIndex;
                 if (self.scenes[old].onExit) |oe| oe(&self.scenes[old]);
                 if (self.transitionNextIndex) |next| {
                     self.currentIndex = next;
                     if (self.scenes[self.currentIndex].onEnter) |ie| ie(&self.scenes[self.currentIndex]);
+
+                    // Clean up transferred objects from old scene after new scene is fully loaded
+                    self.cleanupTransferredObjects(old);
                 }
                 self.transitionState = TransitionState.FadingIn;
                 self.transitionTimer = 0.0;
-            } else {
-
             }
         } else if (self.transitionState == TransitionState.FadingIn) {
             if (self.transitionTimer >= dur) {
@@ -275,6 +365,12 @@ pub const SceneManager = struct {
                 self.transitionTimer = 0.0;
                 self.transitionNextIndex = null;
                 self.inputBlocked = false;
+
+                // Reset zoom to 1.0
+                const cs = self.currentScene();
+                if (cs.gameObjects.getCamera()) |_| {
+                    cs.gameObjects.updateCameraZoom(1.0);
+                }
             }
         }
 
