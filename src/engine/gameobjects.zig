@@ -10,16 +10,18 @@ const MAX_TRIGGERS_PER_GAMEOBJECT: usize = 16;
 pub const TriggerAction = union(enum) {
     print_message: [:0]const u8,
     start_dialogue: struct {
-        dlg: *dialogue.DialogueSystem,
-        starting_node_id: []const u8,
+        runner: *dialogue.Runner,
         context: ?*anyopaque,
-    }
+    },
+    run_action: dialogue.ActionFn,
 };
 
 pub const Trigger = struct {
     rectangle: rl.Rectangle,
     action: TriggerAction,
     was_inside: bool = false,
+    one_shot: bool = false,
+    triggered: bool = false,
 };
 
 pub const GameObject = struct {
@@ -55,34 +57,64 @@ pub const GameObject = struct {
 
     pub fn addTrigger(self: *Self, rectangle: rl.Rectangle, action: TriggerAction) void {
         if (self.triggers_count >= MAX_TRIGGERS_PER_GAMEOBJECT) return;
-        self.triggers[self.triggers_count] = Trigger{ .rectangle = rectangle, .action = action, .was_inside = false };
+        self.triggers[self.triggers_count] = Trigger{
+            .rectangle = rectangle,
+            .action = action,
+            .was_inside = false,
+            .one_shot = false,
+            .triggered = false,
+        };
         self.triggers_count += 1;
     }
 
-pub fn checkTriggersWithPlayer(self: *Self, playerRect: rl.Rectangle, scene: *@import("scenes.zig").Scene) void {
+    pub fn addOneShotTrigger(self: *Self, rectangle: rl.Rectangle, action: TriggerAction) void {
+        if (self.triggers_count >= MAX_TRIGGERS_PER_GAMEOBJECT) return;
+        self.triggers[self.triggers_count] = Trigger{
+            .rectangle = rectangle,
+            .action = action,
+            .was_inside = false,
+            .one_shot = true,
+            .triggered = false,
+        };
+        self.triggers_count += 1;
+    }
+
+    pub fn checkTriggersWithPlayer(self: *Self, playerRect: rl.Rectangle, scene: *@import("scenes.zig").Scene) void {
         var i: usize = 0;
         while (i < self.triggers_count) : (i += 1) {
             var t = &self.triggers[i];
+
+            // Skip already-triggered one-shots
+            if (t.one_shot and t.triggered) continue;
+
             const inside = rl.checkCollisionRecs(playerRect, t.rectangle);
-            if (inside) {
-                if (!t.was_inside) {
-                    switch (t.action) {
-                        .print_message => |msg| {
-                            scene.message = msg;
-                            scene.messageTimer = 2.0;
-                        },
-                        .start_dialogue => |payload| {
-                            // payload: { dlg, starting_node_id, context }
-                            payload.dlg.start(payload.starting_node_id, payload.context) catch {};
-                        },
-                    }
+            if (inside and !t.was_inside) {
+                switch (t.action) {
+                    .print_message => |msg| {
+                        scene.message = msg;
+                        scene.messageTimer = 2.0;
+                    },
+                    .start_dialogue => |payload| {
+                        payload.runner.start(payload.context);
+                    },
+                    .run_action => |action| {
+                        action(null);
+                    },
                 }
-                t.was_inside = true;
-            } else {
-                t.was_inside = false;
+                if (t.one_shot) t.triggered = true;
             }
+            t.was_inside = inside;
         }
     }
+
+    pub fn resetTriggers(self: *Self) void {
+        var i: usize = 0;
+        while (i < self.triggers_count) : (i += 1) {
+            self.triggers[i].was_inside = false;
+            self.triggers[i].triggered = false;
+        }
+    }
+
     pub fn updatePlayer(self: *Self, deltaTime: f32, paused: bool, scene: *@import("scenes.zig").Scene) void {
         if (self.data != .player) return;
 
@@ -231,6 +263,12 @@ pub const SceneGameObjects = struct {
         }
     }
 
+    pub fn resetAllTriggers(self: *Self) void {
+        for (0..self.count) |i| {
+            self.gameObjects[i].resetTriggers();
+        }
+    }
+
     pub fn updatePlayer(self: *Self, deltaTime: f32, paused: bool, scene: *@import("scenes.zig").Scene) void {
         for (0..self.count) |i| {
             const go = &self.gameObjects[i];
@@ -313,7 +351,7 @@ pub const SceneGameObjects = struct {
                     const origin = rl.Vector2{ .x = 0.0, .y = 0.0 };
                     rl.drawTexturePro(plr.texture, src, dest, origin, 0.0, .white);
                 },
-                .camera => |_| {  }
+                .camera => {},
             }
         }
     }
