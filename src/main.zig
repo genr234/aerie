@@ -9,7 +9,6 @@ const root = @import("root.zig");
 
 fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) void {
     _ = scene;
-    // Duplicate objects to new scene, will be cleaned up after scene loads
     _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "player");
     _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "main_camera");
     _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "origin_circle");
@@ -51,7 +50,6 @@ pub fn main() anyerror!void {
     });
     _ = cs.addGameObject(cameraGo);
 
-    // Add origin circle GameObject
     var circleGo = gameobjects.GameObject.init("origin_circle", gameobjects.GameObjectData{
         .circle = .{
             .radius = 4,
@@ -61,7 +59,6 @@ pub fn main() anyerror!void {
     circleGo.position = rl.Vector2{ .x = 15, .y = 15 };
     _ = cs.addGameObject(circleGo);
 
-    // Add trigger zone rectangle GameObject
     var triggerGo = gameobjects.GameObject.init("trigger_zone", gameobjects.GameObjectData{
         .rectangle = .{
             .width = 50,
@@ -71,12 +68,24 @@ pub fn main() anyerror!void {
     });
     triggerGo.position = rl.Vector2{ .x = 300, .y = 200 };
 
-    // Add trigger to the GameObject
-    var dialogueLines = [_][]const u8{
-        "Welcome!",
-        "Press SPACE to continue.",
+    // Create dialogue system with simplified API
+    var gameDialogue = try dialogue.DialogueSystem.init(allocator, .{});
+    defer gameDialogue.deinit();
+
+    // Build dialogue tree with simple method calls
+    try gameDialogue.text("intro_1", "Narrator", "Benvenuto nell'avventura!", "intro_2");
+    try gameDialogue.text("intro_2", "Narrator", "Cosa vuoi fare?", "choice_1");
+
+    var choice_options = [_]dialogue.Choice{
+        .{ .text = "Esplorare il mondo", .next_node_id = "explore" },
+        .{ .text = "Saltare il tutorial", .next_node_id = "skip" },
     };
-    var gameDialogue = dialogue.Dialogue.init(&dialogueLines, "Narrator");
+    try gameDialogue.choice("choice_1", "Narrator", "Scegli un'opzione:", &choice_options);
+
+    try gameDialogue.text("explore", "Narrator", "Hai deciso di esplorare il mondo. Buona fortuna!", "end_1");
+    try gameDialogue.text("skip", "Narrator", "Hai saltato il tutorial. Iniziamo direttamente!", "end_1");
+    try gameDialogue.end("end_1");
+
     triggerGo.addTrigger(rl.Rectangle{
         .x = 300,
         .y = 200,
@@ -86,7 +95,6 @@ pub fn main() anyerror!void {
 
     _ = cs.addGameObject(triggerGo);
 
-    // Add player as a GameObject
     const playerSprite = sprites.Sprite{
         .texture = playerTexture,
         .x = root.F32(screenWidth) / 2.0,
@@ -108,12 +116,31 @@ pub fn main() anyerror!void {
         const deltaTime = rl.getFrameTime();
 
         manager.update(deltaTime);
+        try gameDialogue.update();
 
         // Handle dialogue input
-        if (gameDialogue.active and rl.isKeyPressed(.space)) {
-            gameDialogue.advance();
+        if (gameDialogue.active) {
+            if (rl.isKeyPressed(.space)) {
+                try gameDialogue.advance();
+            }
+
+            if (gameDialogue.getCurrentNode()) |node| {
+                if (node.node_type == .choice) {
+                    if (rl.isKeyPressed(.up)) try gameDialogue.selectPreviousChoice();
+                    if (rl.isKeyPressed(.down)) try gameDialogue.selectNextChoice();
+                } else if (node.node_type == .input) {
+                    // Handle text input
+                    const key = rl.getCharPressed();
+                    if (key > 0 and key < 127) {
+                        gameDialogue.addInputChar(@intCast(key));
+                    }
+                    if (rl.isKeyPressed(.backspace)) {
+                        gameDialogue.removeInputChar();
+                    }
+                }
+            }
         }
-        
+
         if (rl.isKeyPressed(.r)) {
             var ns = &manager.scenes[1];
             ns.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
@@ -125,20 +152,14 @@ pub fn main() anyerror!void {
         rl.clearBackground(.white);
 
         var currentCamera = manager.currentScene().getGameObjectCamera() orelse manager.currentScene().camera;
-        // Update and render game
         rl.beginMode2D(currentCamera);
 
-        // Draw all scene GameObjects
         manager.currentScene().drawGameObjects();
-
-        // Update player through the scene
         manager.currentScene().updateGameObjectPlayer(deltaTime, gameDialogue.active);
 
-        // Check triggers on all GameObjects with player rectangle
         if (manager.currentScene().getPlayerRect()) |playerRect| {
             manager.currentScene().checkGameObjectTriggers(playerRect);
 
-            // Update camera target based on player position
             const player = manager.currentScene().getGameObjectByTag("player");
             if (player) |pg| {
                 const spriteW: f32 = @floatFromInt(pg.data.player.texture.width);
@@ -148,15 +169,12 @@ pub fn main() anyerror!void {
                     .y = pg.position.y + spriteH / 2.0,
                 };
                 manager.currentScene().updateGameObjectCamera(targetPos);
-
-                // Update the current camera variable for rendering
                 currentCamera = manager.currentScene().getGameObjectCamera() orelse currentCamera;
             }
         }
 
         rl.endMode2D();
 
-        // Render scene message
         if (manager.currentScene().messageTimer > 0.0) {
             if (manager.currentScene().message) |msg| {
                 rl.drawText(msg, 10, 10, 20, .red);
@@ -164,11 +182,11 @@ pub fn main() anyerror!void {
             manager.currentScene().messageTimer -= deltaTime;
         }
 
-        // Draw dialogue
-        gameDialogue.draw(20, screenHeight - 120, screenWidth - 40, 100);
+        try gameDialogue.draw(20, screenHeight - 120, screenWidth - 40, 100);
 
         manager.draw();
 
         rl.endDrawing();
     }
 }
+

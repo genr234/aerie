@@ -9,7 +9,11 @@ const MAX_TRIGGERS_PER_GAMEOBJECT: usize = 16;
 
 pub const TriggerAction = union(enum) {
     print_message: [:0]const u8,
-    start_dialogue: *dialogue.Dialogue
+    start_dialogue: struct {
+        dlg: *dialogue.DialogueSystem,
+        starting_node_id: []const u8,
+        context: ?*anyopaque,
+    }
 };
 
 pub const Trigger = struct {
@@ -55,7 +59,7 @@ pub const GameObject = struct {
         self.triggers_count += 1;
     }
 
-    pub fn checkTriggersWithPlayer(self: *Self, playerRect: rl.Rectangle, scene: *@import("scenes.zig").Scene) void {
+pub fn checkTriggersWithPlayer(self: *Self, playerRect: rl.Rectangle, scene: *@import("scenes.zig").Scene) void {
         var i: usize = 0;
         while (i < self.triggers_count) : (i += 1) {
             var t = &self.triggers[i];
@@ -67,8 +71,9 @@ pub const GameObject = struct {
                             scene.message = msg;
                             scene.messageTimer = 2.0;
                         },
-                        .start_dialogue => |dlg| {
-                            dlg.start();
+                        .start_dialogue => |payload| {
+                            // payload: { dlg, starting_node_id, context }
+                            payload.dlg.start(payload.starting_node_id, payload.context) catch {};
                         },
                     }
                 }
@@ -78,7 +83,6 @@ pub const GameObject = struct {
             }
         }
     }
-
     pub fn updatePlayer(self: *Self, deltaTime: f32, paused: bool, scene: *@import("scenes.zig").Scene) void {
         if (self.data != .player) return;
 

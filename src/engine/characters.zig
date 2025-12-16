@@ -8,7 +8,7 @@ const rl = @import("raylib");
 const MAX_TRIGGERS: usize = 64;
 const TriggerError = error{TooManyTriggers};
 
-pub const TriggerAction = union(enum) { print_message: [:0]const u8, start_dialogue: *dialogue.Dialogue };
+pub const TriggerAction = union(enum) { print_message: [:0]const u8, start_dialogue: struct { dlg: *dialogue.DialogueSystem, starting_node_id: []const u8, context: ?*anyopaque } };
 
 const Trigger = struct {
     rectangle: rl.Rectangle,
@@ -131,8 +131,8 @@ pub const Player = struct {
                             self.scene.message = msg;
                             self.scene.messageTimer = 2.0; // show for 2 seconds
                         },
-                        .start_dialogue => |dlg| {
-                            dlg.start();
+                        .start_dialogue => |payload| {
+                            payload.dlg.start(payload.starting_node_id, payload.context) catch {};
                         },
                     }
                 }
