@@ -2,101 +2,268 @@ const std = @import("std");
 const rl = @import("raylib");
 const gameobjects = @import("gameobjects.zig");
 
+pub const ObjectConfig = struct {
+    tag: []const u8,
+    position: rl.Vector2 = rl.Vector2{ .x = 0, .y = 0 },
+    data: gameobjects.GameObjectData,
+    trigger: ?TriggerConfig = null,
+};
+
+pub const TriggerConfig = struct {
+    bounds: rl.Rectangle,
+    action: gameobjects.TriggerAction,
+};
+
+pub const SceneType = enum {
+    exploration,
+};
+
+const SceneTypeVTable = struct {
+    update: ?*const fn (*Scene, f32) void = null,
+    draw: ?*const fn (*Scene) void = null,
+    onEnter: ?*const fn (*Scene) void = null,
+    onExit: ?*const fn (*Scene) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+};
+
+fn explorationUpdate(scene: *Scene, dt: f32) void {
+    if (scene.update) |u| u(scene, dt);
+}
+
+fn explorationDraw(scene: *Scene) void {
+    if (scene.draw) |d| d(scene);
+}
+
+fn explorationOnEnter(scene: *Scene) void {
+    if (scene.onEnter) |f| f(scene);
+}
+
+fn explorationOnExit(scene: *Scene) void {
+    if (scene.onExit) |f| f(scene);
+}
+
+fn explorationOnTransition(scene: *Scene, mgr: *SceneManager, dst_index: usize) void {
+    if (scene.onTransition) |f| f(scene, mgr, dst_index);
+}
+
+fn vtableFor(scene_type: SceneType) SceneTypeVTable {
+    return switch (scene_type) {
+        .exploration => .{
+            .update = explorationUpdate,
+            .draw = explorationDraw,
+            .onEnter = explorationOnEnter,
+            .onExit = explorationOnExit,
+            .onTransition = explorationOnTransition,
+        },
+    };
+}
+
+pub const SceneConfig = struct {
+    width: i32 = 800,
+    height: i32 = 450,
+    objects: []const ObjectConfig = &.{},
+
+    scene_type: SceneType = .exploration,
+
+    update: ?*const fn (*Scene, f32) void = null,
+    draw: ?*const fn (*Scene) void = null,
+    onEnter: ?*const fn (*Scene) void = null,
+    onExit: ?*const fn (*Scene) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+    setup: ?*const fn (*Scene, *anyopaque) void = null,
+};
+
 pub const Scene = struct {
     width: i32 = 800,
     height: i32 = 450,
     camera: rl.Camera2D = rl.Camera2D{
-        .offset = rl.Vector2{ .x = 0.0, .y = 0.0 },
-        .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
-        .rotation = 0.0,
+        .offset = .{ .x = 0, .y = 0 },
+        .target = .{ .x = 0, .y = 0 },
+        .rotation = 0,
         .zoom = 1.0,
     },
-    update: ?*const fn (scene: *Scene, deltaTime: f32) void = null,
-    draw: ?*const fn (scene: *Scene) void = null,
-    onEnter: ?*const fn (scene: *Scene) void = null,
-    onExit: ?*const fn (scene: *Scene) void = null,
-    onTransition: ?*const fn (scene: *Scene, manager: *SceneManager, toSceneIndex: usize) void = null,
+
+    scene_type: SceneType = .exploration,
+
+    update: ?*const fn (*Scene, f32) void = null,
+    draw: ?*const fn (*Scene) void = null,
+    onEnter: ?*const fn (*Scene) void = null,
+    onExit: ?*const fn (*Scene) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+
     message: ?[:0]const u8 = null,
     messageTimer: f32 = 0.0,
 
-    // Scene game objects
     gameObjects: gameobjects.SceneGameObjects = gameobjects.SceneGameObjects.init(),
 
     const Self = @This();
 
-    pub fn init(
-        width: i32,
-        height: i32,
-        update: ?*const fn (scene: *Scene, deltaTime: f32) void,
-        draw: ?*const fn (scene: *Scene) void,
-        onEnter: ?*const fn (scene: *Scene) void,
-        onExit: ?*const fn (scene: *Scene) void,
-    ) Scene {
-        return Scene{
+    pub fn init(width: i32, height: i32) Scene {
+        return .{
             .width = width,
             .height = height,
-            .camera = rl.Camera2D{
-                .offset = rl.Vector2{ .x = 0.0, .y = 0.0 },
-                .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
-                .rotation = 0.0,
-                .zoom = 1.0,
-            },
-            .update = update,
-            .draw = draw,
-            .onEnter = onEnter,
-            .onExit = onExit,
-            .onTransition = null,
-            .message = null,
-            .messageTimer = 0.0,
-            .gameObjects = gameobjects.SceneGameObjects.init(),
+            .scene_type = .exploration,
         };
     }
 
-    pub fn addGameObject(self: *Self, go: gameobjects.GameObject) ?usize {
-        return self.gameObjects.addGameObject(go);
+    fn vtable(self: *Self) SceneTypeVTable {
+        return vtableFor(self.scene_type);
     }
 
-    pub fn getGameObject(self: *Self, index: usize) ?*gameobjects.GameObject {
-        return self.gameObjects.getGameObject(index);
+    pub fn dispatchUpdate(self: *Self, dt: f32) void {
+        const vt = self.vtable();
+        if (vt.update) |f| f(self, dt);
     }
 
-    pub fn getGameObjectByTag(self: *Self, tag: []const u8) ?*gameobjects.GameObject {
+    pub fn dispatchDraw(self: *Self) void {
+        const vt = self.vtable();
+        if (vt.draw) |f| f(self);
+    }
+
+    pub fn dispatchOnEnter(self: *Self) void {
+        const vt = self.vtable();
+        if (vt.onEnter) |f| f(self);
+    }
+
+    pub fn dispatchOnExit(self: *Self) void {
+        const vt = self.vtable();
+        if (vt.onExit) |f| f(self);
+    }
+
+    pub fn dispatchOnTransition(self: *Self, mgr: *SceneManager, dst_index: usize) void {
+        const vt = self.vtable();
+        if (vt.onTransition) |f| f(self, mgr, dst_index);
+    }
+
+    pub fn add(self: *Self, go: gameobjects.GameObject) void {
+        _ = self.gameObjects.addGameObject(go);
+    }
+
+    pub fn get(self: *Self, tag: []const u8) ?*gameobjects.GameObject {
         return self.gameObjects.getGameObjectByTag(tag);
-    }
-
-    pub fn removeGameObject(self: *Self, index: usize) void {
-        self.gameObjects.removeGameObject(index);
-    }
-
-    pub fn checkGameObjectTriggers(self: *Self, playerRect: rl.Rectangle) void {
-        self.gameObjects.checkAllTriggersWithPlayer(playerRect, self);
-    }
-
-    pub fn updateGameObjectPlayer(self: *Self, deltaTime: f32, paused: bool) void {
-        self.gameObjects.updatePlayer(deltaTime, paused, self);
-    }
-
-    pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
-        return self.gameObjects.getPlayerRect();
-    }
-
-    pub fn getGameObjectCamera(self: *Self) ?rl.Camera2D {
-        return self.gameObjects.getCamera();
-    }
-
-    pub fn updateGameObjectCamera(self: *Self, newTarget: rl.Vector2) void {
-        self.gameObjects.updateCamera(newTarget);
     }
 
     pub fn drawGameObjects(self: *Self) void {
         self.gameObjects.draw();
     }
 
-    pub fn clearGameObjects(self: *Self) void {
-        self.gameObjects.clear();
+    pub fn updatePlayer(self: *Self, dt: f32, paused: bool) void {
+        self.gameObjects.updatePlayer(dt, paused, self);
     }
 
-    // pub fn setup(self: *Scene) void {}
+    pub fn checkTriggers(self: *Self, player_rect: rl.Rectangle) void {
+        self.gameObjects.checkAllTriggersWithPlayer(player_rect, self);
+    }
+
+    pub fn getCamera(self: *Self) ?rl.Camera2D {
+        return self.gameObjects.getCamera();
+    }
+
+    pub fn updateCamera(self: *Self, target: rl.Vector2) void {
+        self.gameObjects.updateCamera(target);
+    }
+
+    pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
+        return self.gameObjects.getPlayerRect();
+    }
+};
+
+pub const Builder = struct {
+    scene: Scene,
+
+    pub fn init(width: i32, height: i32) Builder {
+        return .{ .scene = Scene.init(width, height) };
+    }
+
+    pub fn reset(self: *Builder, width: i32, height: i32) *Builder {
+        self.scene = Scene.init(width, height);
+        return self;
+    }
+
+    pub fn buildAndReset(self: *Builder, width: i32, height: i32) Scene {
+        const out = self.scene;
+        self.scene = Scene.init(width, height);
+        return out;
+    }
+
+    pub fn sceneType(self: *Builder, t: SceneType) *Builder {
+        self.scene.scene_type = t;
+        return self;
+    }
+
+    pub fn camera(self: *Builder, tag: []const u8, cam: struct {
+        offset: rl.Vector2,
+        target: rl.Vector2,
+        rotation: f32 = 0.0,
+        zoom: f32 = 1.0,
+    }) *Builder {
+        self.scene.add(gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
+            .camera = .{
+                .offset = cam.offset,
+                .target = cam.target,
+                .rotation = cam.rotation,
+                .zoom = cam.zoom,
+            },
+        }));
+        return self;
+    }
+
+    pub fn player(self: *Builder, tag: []const u8, config: struct {
+        texture: rl.Texture2D,
+        speed: f32 = 100,
+        scale: f32 = 1.0,
+        spawn: rl.Vector2,
+    }) *Builder {
+        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
+            .player = .{
+                .texture = config.texture,
+                .speed = config.speed,
+                .sprite = .{
+                    .texture = config.texture,
+                    .x = config.spawn.x,
+                    .y = config.spawn.y,
+                },
+                .scale = config.scale,
+            },
+        });
+        go.position = config.spawn;
+        self.scene.add(go);
+        return self;
+    }
+
+    pub fn circle(self: *Builder, tag: []const u8, pos: rl.Vector2, radius: f32, color: rl.Color) *Builder {
+        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
+            .circle = .{ .radius = radius, .color = color },
+        });
+        go.position = pos;
+        self.scene.add(go);
+        return self;
+    }
+
+    pub fn rect(self: *Builder, tag: []const u8, pos: rl.Vector2, size: rl.Vector2, color: rl.Color) *Builder {
+        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
+            .rectangle = .{ .width = size.x, .height = size.y, .color = color },
+        });
+        go.position = pos;
+        self.scene.add(go);
+        return self;
+    }
+
+    pub fn trigger(self: *Builder, tag: []const u8, bounds: rl.Rectangle, action: gameobjects.TriggerAction) *Builder {
+        if (self.scene.get(tag)) |go| {
+            go.addTrigger(bounds, action);
+        }
+        return self;
+    }
+
+    pub fn onTransition(self: *Builder, func: *const fn (*Scene, *SceneManager, usize) void) *Builder {
+        self.scene.onTransition = func;
+        return self;
+    }
+
+    pub fn build(self: *Builder) Scene {
+        return self.scene;
+    }
 };
 
 pub const TransitionState = enum {
@@ -131,55 +298,29 @@ pub const SceneManager = struct {
     objectsToCleanup: [64][]const u8 = undefined,
     cleanupCount: usize = 0,
 
-    // initialize with an external buffer (caller must ensure buffer outlives manager)
-    pub fn initStatic(scenes: []Scene) SceneManager {
-        return SceneManager{
-            .scenes = scenes,
-            .currentIndex = 0,
-            .lastIndex = 0,
-            .allocator = null,
-            .capacity = scenes.len,
-            .history = []usize{},
-            .historyTop = 0,
-            .transitionState = TransitionState.None,
-            .transitionTimer = 0.0,
-            .transitionDuration = 0.4,
-            .transitionNextIndex = null,
-            .inputBlocked = false,
-            .zoomTarget = 1.0,
-            .zoomStart = 1.0,
+    pub fn initStatic(scenes_ptr: []Scene) SceneManager {
+        return .{
+            .scenes = scenes_ptr,
+            .capacity = scenes_ptr.len,
+            .history = &.{},
             .objectsToCleanup = undefined,
-            .cleanupCount = 0,
         };
     }
 
     pub fn initWithAllocator(allocator: *std.mem.Allocator, capacity: usize) !SceneManager {
         const scenes_ptr = try allocator.alloc(Scene, capacity);
-        // initialize entries with sensible defaults
-        for (scenes_ptr[0..capacity]) |*s| {
-            s.* = Scene.init(800, 450, null, null, null, null);
+        for (scenes_ptr) |*s| {
+            s.* = Scene.init(800, 450);
         }
         const history_ptr = try allocator.alloc(usize, capacity);
-        // zero history
-        for (history_ptr[0..capacity]) |*h| h.* = 0;
+        @memset(history_ptr, 0);
 
-        return SceneManager{
-            .scenes = scenes_ptr[0..capacity],
-            .currentIndex = 0,
-            .lastIndex = 0,
+        return .{
+            .scenes = scenes_ptr,
             .allocator = allocator,
             .capacity = capacity,
-            .history = history_ptr[0..capacity],
-            .historyTop = 0,
-            .transitionState = TransitionState.None,
-            .transitionTimer = 0.0,
-            .transitionDuration = 0.4,
-            .transitionNextIndex = null,
-            .inputBlocked = false,
-            .zoomTarget = 1.0,
-            .zoomStart = 1.0,
+            .history = history_ptr,
             .objectsToCleanup = undefined,
-            .cleanupCount = 0,
         };
     }
 
@@ -191,22 +332,7 @@ pub const SceneManager = struct {
             }
             // free scenes
             alloc.free(self.scenes);
-            self.allocator = null;
-            self.capacity = 0;
-            self.currentIndex = 0;
-            self.lastIndex = 0;
-            self.transitionState = TransitionState.None;
-            self.transitionTimer = 0.0;
-            self.transitionNextIndex = null;
-            self.inputBlocked = false;
-            self.zoomTarget = 1.0;
-            self.zoomStart = 1.0;
-            self.cleanupCount = 0;
         }
-    }
-
-    pub fn init(scenes: []Scene) SceneManager {
-        return SceneManager.initStatic(scenes);
     }
 
     pub fn currentScene(self: *SceneManager) *Scene {
@@ -215,188 +341,134 @@ pub const SceneManager = struct {
 
     fn startTransition(self: *SceneManager, index: usize) void {
         if (index >= self.scenes.len) return;
-        if (self.transitionState != TransitionState.None) return;
-        const cs = &self.scenes[self.currentIndex];
-        if (cs.getGameObjectCamera()) |cam| {
+        if (self.transitionState != .None) return;
+
+        const cs = self.currentScene();
+        if (cs.getCamera()) |cam| {
             self.zoomStart = cam.zoom;
         } else {
             self.zoomStart = 1.0;
         }
 
         self.cleanupCount = 0;
-
-        if (cs.onTransition) |ot| {
-            ot(cs, self, index);
-        }
+        cs.dispatchOnTransition(self, index);
 
         self.zoomTarget = 1.5;
         self.transitionNextIndex = index;
-        self.transitionState = TransitionState.FadingOut;
+        self.transitionState = .FadingOut;
         self.transitionTimer = 0.0;
         self.inputBlocked = true;
     }
 
-    pub fn changeScene(self: *SceneManager, index: usize) void {
-        if (index >= self.scenes.len) return;
+    pub fn changeScene(self: *SceneManager, index: usize) !void {
+        if (index >= self.capacity) return error.IndexOutOfBounds;
+        if (self.transitionState != .None) return error.TransitionInProgress;
         self.lastIndex = self.currentIndex;
         self.startTransition(index);
     }
 
-    pub fn pushScene(self: *SceneManager, index: usize) void {
-        if (index >= self.scenes.len) return;
-        if (self.history.len != 0) {
-            if (self.historyTop < self.history.len) {
-                self.history[self.historyTop] = self.currentIndex;
-                self.historyTop += 1;
-            } else {
-                for (0..(self.history.len - 1)) |i| {
-                    self.history[i] = self.history[i + 1];
-                }
-                self.history[self.history.len - 1] = self.currentIndex;
-            }
-        } else {
-            self.lastIndex = self.currentIndex;
-        }
-        self.startTransition(index);
-    }
+    pub fn transferGameObject(self: *SceneManager, from: usize, to: usize, tag: []const u8) bool {
+        if (from >= self.scenes.len or to >= self.scenes.len) return false;
 
-    pub fn nextScene(self: *SceneManager) void {
-        if (self.currentIndex + 1 < self.scenes.len) {
-            self.lastIndex = self.currentIndex;
-            self.startTransition(self.currentIndex + 1);
-        }
-    }
+        const src = &self.scenes[from];
+        const dst = &self.scenes[to];
 
-    pub fn popScene(self: *SceneManager) void {
-        var target: ?usize = null;
-        if (self.history.len != 0 and self.historyTop > 0) {
-            self.historyTop -= 1;
-            target = self.history[self.historyTop];
-        } else if (self.lastIndex < self.scenes.len) {
-            target = self.lastIndex;
-        }
-        if (target) |t| {
-            self.startTransition(t);
-        }
-    }
-
-    pub fn transferGameObjectByIndex(self: *SceneManager, fromScene: usize, toScene: usize, objectIndex: usize) bool {
-        if (fromScene >= self.scenes.len or toScene >= self.scenes.len) return false;
-        if (fromScene == toScene) return false;
-        if (objectIndex >= self.scenes[fromScene].gameObjects.count) return false;
-
-        const go = self.scenes[fromScene].getGameObject(objectIndex);
-        if (go) |obj| {
-            _ = self.scenes[toScene].addGameObject(obj.*);
-            if (self.cleanupCount < self.objectsToCleanup.len) {
-                self.objectsToCleanup[self.cleanupCount] = obj.getTag();
-                self.cleanupCount += 1;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    pub fn transferGameObject(self: *SceneManager, fromScene: usize, toScene: usize, objectTag: []const u8) bool {
-        if (fromScene >= self.scenes.len or toScene >= self.scenes.len) return false;
-        if (fromScene == toScene) return false;
-
-        const go = self.scenes[fromScene].getGameObjectByTag(objectTag);
-        if (go) |obj| {
-            _ = self.scenes[toScene].addGameObject(obj.*);
-            if (self.cleanupCount < self.objectsToCleanup.len) {
-                self.objectsToCleanup[self.cleanupCount] = objectTag;
-                self.cleanupCount += 1;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    pub fn cleanupTransferredObjects(self: *SceneManager, fromSceneIndex: usize) void {
-        for (0..self.cleanupCount) |i| {
-            const tag = self.objectsToCleanup[i];
-            // Find and remove the object by tag from the source scene
-            for (0..self.scenes[fromSceneIndex].gameObjects.count) |j| {
-                if (std.mem.eql(u8, self.scenes[fromSceneIndex].gameObjects.gameObjects[j].getTag(), tag)) {
-                    self.scenes[fromSceneIndex].removeGameObject(j);
+        {
+            var j: usize = 0;
+            while (j < dst.gameObjects.count) : (j += 1) {
+                if (std.mem.eql(u8, dst.gameObjects.gameObjects[j].getTag(), tag)) {
+                    dst.gameObjects.removeGameObject(j);
                     break;
                 }
             }
         }
-        self.cleanupCount = 0;
+
+        var i: usize = 0;
+        while (i < src.gameObjects.count) : (i += 1) {
+            if (std.mem.eql(u8, src.gameObjects.gameObjects[i].getTag(), tag)) {
+                const moved = src.gameObjects.gameObjects[i];
+                src.gameObjects.removeGameObject(i);
+                dst.add(moved);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    pub fn cleanupTransferredObjects(self: *SceneManager, fromIdx: usize) void {
+        _ = self;
+        _ = fromIdx;
     }
 
     pub fn update(self: *SceneManager, deltaTime: f32) void {
-        if (self.transitionState == TransitionState.None) {
+        if (self.transitionState == .None) {
             const cs = self.currentScene();
-            if (cs.update) |u| u(cs, deltaTime);
+            cs.dispatchUpdate(deltaTime);
             return;
         }
 
         self.transitionTimer += deltaTime;
         const dur = self.transitionDuration;
-        if (self.transitionState == TransitionState.FadingOut) {
-            // Apply zoom during fade out
+
+        if (self.transitionState == .FadingOut) {
             const progress = std.math.clamp(self.transitionTimer / dur, 0.0, 1.0);
             const zoomValue = std.math.lerp(self.zoomStart, self.zoomTarget, progress);
 
             const cs = self.currentScene();
-            if (cs.gameObjects.getCamera()) |_| {
-                cs.gameObjects.updateCameraZoom(zoomValue);
-            }
+            cs.gameObjects.updateCameraZoom(zoomValue);
+
+            cs.dispatchUpdate(deltaTime);
 
             if (self.transitionTimer >= dur) {
                 const old = self.currentIndex;
-                if (self.scenes[old].onExit) |oe| oe(&self.scenes[old]);
+                self.scenes[old].dispatchOnExit();
+
                 if (self.transitionNextIndex) |next| {
                     self.currentIndex = next;
-                    if (self.scenes[self.currentIndex].onEnter) |ie| ie(&self.scenes[self.currentIndex]);
-
-                    // Clean up transferred objects from old scene after new scene is fully loaded
+                    self.scenes[self.currentIndex].dispatchOnEnter();
                     self.cleanupTransferredObjects(old);
                 }
-                self.transitionState = TransitionState.FadingIn;
+                self.transitionState = .FadingIn;
                 self.transitionTimer = 0.0;
             }
-        } else if (self.transitionState == TransitionState.FadingIn) {
+            return;
+        }
+
+        if (self.transitionState == .FadingIn) {
             if (self.transitionTimer >= dur) {
-                self.transitionState = TransitionState.None;
+                self.transitionState = .None;
                 self.transitionTimer = 0.0;
                 self.transitionNextIndex = null;
                 self.inputBlocked = false;
-
-                // Reset zoom to 1.0
-                const cs = self.currentScene();
-                if (cs.gameObjects.getCamera()) |_| {
-                    cs.gameObjects.updateCameraZoom(1.0);
-                }
+                self.currentScene().gameObjects.updateCameraZoom(1.0);
+                return;
             }
-        }
 
-        if (self.transitionState == TransitionState.FadingIn) {
+            // Durante il fade-in, la scena visibile è quella nuova.
             const cs2 = self.currentScene();
-            if (cs2.update) |upfn| upfn(cs2, deltaTime);
+            cs2.dispatchUpdate(deltaTime);
+            return;
         }
     }
 
     pub fn draw(self: *SceneManager) void {
+        // Durante il fade-out la scena visibile deve essere quella vecchia.
+        // Durante il fade-in / None, quella corrente (che è già stata switchata).
+        // Nota: il cambio indice avviene alla fine del fade-out (in update).
         const cs = self.currentScene();
-        if (cs.draw) |d| d(cs);
+        cs.dispatchDraw();
 
-        if (self.transitionState != TransitionState.None) {
-             const dur = self.transitionDuration;
-             var alpha_f: f32 = 0.0;
-             if (self.transitionState == TransitionState.FadingOut) {
-                 alpha_f = std.math.clamp(self.transitionTimer / dur, 0.0, 1.0);
-             } else {
-                 alpha_f = std.math.clamp(1.0 - (self.transitionTimer / dur), 0.0, 1.0);
-             }
-             const alpha_u8 = @as(u8, @intFromFloat(alpha_f * 255.0));
-             const col = rl.Color{ .r = 0, .g = 0, .b = 0, .a = alpha_u8 };
-             const w = rl.getScreenWidth();
-             const h = rl.getScreenHeight();
-             rl.drawRectangle(0, 0, w, h, col);
+        if (self.transitionState != .None) {
+            const dur = self.transitionDuration;
+            var alpha_f: f32 = 0.0;
+            if (self.transitionState == .FadingOut) {
+                alpha_f = std.math.clamp(self.transitionTimer / dur, 0.0, 1.0);
+            } else {
+                alpha_f = std.math.clamp(1.0 - (self.transitionTimer / dur), 0.0, 1.0);
+            }
+            const alpha_u8 = @as(u8, @intFromFloat(alpha_f * 255.0));
+            rl.drawRectangle(0, 0, rl.getScreenWidth(), rl.getScreenHeight(), rl.Color{ .r = 0, .g = 0, .b = 0, .a = alpha_u8 });
         }
     }
 };

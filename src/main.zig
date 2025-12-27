@@ -30,60 +30,17 @@ pub fn main() anyerror!void {
     defer _ = gpa.deinit();
     var allocator = gpa.allocator();
 
-    var manager = try scenes.SceneManager.initWithAllocator(&allocator, 4);
-    defer manager.deinit();
-
-    var cs = &manager.scenes[0];
-    cs.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
-    cs.onTransition = onSceneTransition;
-
-    const cameraGo = gameobjects.GameObject.init("main_camera", gameobjects.GameObjectData{
-        .camera = .{
-            .offset = rl.Vector2{
-                .x = root.F32(screenWidth) / 2.0,
-                .y = root.F32(screenHeight) / 2.0,
-            },
-            .target = rl.Vector2{ .x = 0.0, .y = 0.0 },
-            .rotation = 0.0,
-            .zoom = 1.0,
-        },
-    });
-    _ = cs.addGameObject(cameraGo);
-
-    var circleGo = gameobjects.GameObject.init("origin_circle", gameobjects.GameObjectData{
-        .circle = .{
-            .radius = 4,
-            .color = rl.Color.blue,
-        },
-    });
-    circleGo.position = rl.Vector2{ .x = 15, .y = 15 };
-    _ = cs.addGameObject(circleGo);
-
-    var triggerGo = gameobjects.GameObject.init("trigger_zone", gameobjects.GameObjectData{
-        .rectangle = .{
-            .width = 50,
-            .height = 50,
-            .color = rl.Color.green,
-        },
-    });
-    triggerGo.position = rl.Vector2{ .x = 300, .y = 200 };
-
+    // Setup Dialogue
     var builder = dialogue.Builder.init(allocator);
     defer builder.deinit();
 
-    _ = builder.say("Narrator", "Hello!").label("intro_2");
-    _ = builder.say("Narrator", "What do you want to do?").label("choice_1");
-
-    var choice_options = [_]dialogue.Option{
-        .{ .text = "option one", .goto = "one" },
-        .{ .text = "option two", .goto = "two" },
-    };
-    _ = builder.ask("Narrator", "Choose an option", &choice_options).label("explore_ask");
-
-    _ = builder.say("Narrator", "Option one! Great!").goto("end_1");
+    _ = builder.say("Narrator", "Hello!");
+    _ = builder.ask("Narrator", "Choose an option", &[_]dialogue.Option{
+        .{ .text = "option one", .goto = "skip" },
+        .{ .text = "option two", .goto = "skip" },
+    });
     _ = builder.label("skip");
-    _ = builder.say("Narrator", "Option two! Nice!").goto("end_1");
-    _ = builder.label("end_1");
+    _ = builder.say("Narrator", "The end.");
     _ = builder.done();
 
     var script = try builder.build();
@@ -92,34 +49,29 @@ pub fn main() anyerror!void {
     var gameDialogue = dialogue.Runner.init(allocator, &script);
     defer gameDialogue.deinit();
 
+    var manager = try scenes.SceneManager.initWithAllocator(&allocator, 10);
+    defer manager.deinit();
 
-    triggerGo.addTrigger(rl.Rectangle{
-        .x = 300,
-        .y = 200,
-        .width = 50,
-        .height = 50,
-    }, gameobjects.TriggerAction{ .start_dialogue = .{
-        .runner = &gameDialogue,
-        .context = null,
-    } });
+    var sceneBuilder = scenes.Builder.init(screenWidth, screenHeight);
 
-    _ = cs.addGameObject(triggerGo);
-
-    const playerSprite = sprites.Sprite{
-        .texture = playerTexture,
-        .x = root.F32(screenWidth) / 2.0,
-        .y = root.F32(screenHeight) / 2.0,
-    };
-    var playerGo = gameobjects.GameObject.init("player", gameobjects.GameObjectData{
-        .player = .{
+    manager.scenes[0] = sceneBuilder
+        .camera("main_camera", .{
+            .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
+            .target = .{ .x = 0, .y = 0 },
+            .rotation = 0,
+            .zoom = 1.0,
+        })
+        .player("player", .{
             .texture = playerTexture,
             .speed = 100,
-            .sprite = playerSprite,
-            .scale = 1.0,
-        },
-    });
-    playerGo.position = rl.Vector2{ .x = root.F32(screenWidth) / 2.0, .y = root.F32(screenHeight) / 2.0 };
-    _ = cs.addGameObject(playerGo);
+            .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
+        })
+        .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
+        .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
+        .trigger("trigger_zone", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, .{
+            .start_dialogue = .{ .runner = &gameDialogue, .context = null },
+        })
+        .build();
 
     // Main game loop
     while (!rl.windowShouldClose()) {
@@ -153,44 +105,52 @@ pub fn main() anyerror!void {
         }
 
         if (rl.isKeyPressed(.r)) {
-            var ns = &manager.scenes[1];
-            ns.* = scenes.Scene.init(screenWidth, screenHeight, null, null, null, null);
-            ns.onTransition = onSceneTransition;
-            manager.changeScene(1);
+            manager.scenes[manager.currentIndex+1] = sceneBuilder
+                .reset(sceneBuilder.scene.width, sceneBuilder.scene.height)
+                .camera("main_camera", .{
+                    .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
+                    .target = .{ .x = 0, .y = 0 },
+                    .rotation = 0,
+                    .zoom = 1.0,
+                })
+                .player("player", .{
+                    .texture = playerTexture,
+                    .speed = 100,
+                    .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
+                })
+                .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
+                .build();
+            manager.changeScene(manager.currentIndex+1) catch {};
+        }
+
+        const currentScene = manager.currentScene();
+
+        currentScene.updatePlayer(deltaTime, gameDialogue.isActive());
+
+        if (currentScene.getPlayerRect()) |playerRect| {
+            currentScene.checkTriggers(playerRect);
+
+            if (currentScene.get("player")) |playerGo| {
+                const targetPos = rl.Vector2{
+                    .x = playerGo.position.x + 16,
+                    .y = playerGo.position.y + 16,
+                };
+                currentScene.updateCamera(targetPos);
+            }
         }
 
         rl.beginDrawing();
         rl.clearBackground(.white);
 
-        var currentCamera = manager.currentScene().getGameObjectCamera() orelse manager.currentScene().camera;
+        const currentCamera = currentScene.getCamera() orelse currentScene.camera;
+
         rl.beginMode2D(currentCamera);
-
-        manager.currentScene().drawGameObjects();
-        manager.currentScene().updateGameObjectPlayer(deltaTime, gameDialogue.isActive());
-
-        if (manager.currentScene().getPlayerRect()) |playerRect| {
-            manager.currentScene().checkGameObjectTriggers(playerRect);
-
-            const player = manager.currentScene().getGameObjectByTag("player");
-            if (player) |pg| {
-                const spriteW: f32 = @floatFromInt(pg.data.player.texture.width);
-                const spriteH: f32 = @floatFromInt(pg.data.player.texture.height);
-                const targetPos = rl.Vector2{
-                    .x = pg.position.x + spriteW / 2.0,
-                    .y = pg.position.y + spriteH / 2.0,
-                };
-                manager.currentScene().updateGameObjectCamera(targetPos);
-                currentCamera = manager.currentScene().getGameObjectCamera() orelse currentCamera;
-            }
-        }
-
+        currentScene.drawGameObjects();
         rl.endMode2D();
 
-        if (manager.currentScene().messageTimer > 0.0) {
-            if (manager.currentScene().message) |msg| {
-                rl.drawText(msg, 10, 10, 20, .red);
-            }
-            manager.currentScene().messageTimer -= deltaTime;
+        if (currentScene.messageTimer > 0.0) {
+            if (currentScene.message) |msg| rl.drawText(msg, 10, 10, 20, .red);
+            currentScene.messageTimer -= deltaTime;
         }
 
         const dialogueBounds = rl.Rectangle{
@@ -200,6 +160,8 @@ pub fn main() anyerror!void {
             .height = 100,
         };
         dialogue.draw(&gameDialogue, dialogueBounds, .{});
+
+        rl.drawText(rl.textFormat("Scene: %d", .{manager.currentIndex}), 10, 20, 20, .green);
 
         manager.draw();
 
