@@ -453,9 +453,6 @@ pub const SceneManager = struct {
     }
 
     pub fn draw(self: *SceneManager) void {
-        // Durante il fade-out la scena visibile deve essere quella vecchia.
-        // Durante il fade-in / None, quella corrente (che è già stata switchata).
-        // Nota: il cambio indice avviene alla fine del fade-out (in update).
         const cs = self.currentScene();
         cs.dispatchDraw();
 
