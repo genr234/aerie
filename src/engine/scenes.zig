@@ -1,18 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
-const gameobjects = @import("gameobjects.zig");
-
-pub const ObjectConfig = struct {
-    tag: []const u8,
-    position: rl.Vector2 = rl.Vector2{ .x = 0, .y = 0 },
-    data: gameobjects.GameObjectData,
-    trigger: ?TriggerConfig = null,
-};
-
-pub const TriggerConfig = struct {
-    bounds: rl.Rectangle,
-    action: gameobjects.TriggerAction,
-};
+const ecs = @import("ecs.zig");
 
 pub const SceneType = enum {
     exploration,
@@ -61,7 +49,6 @@ fn vtableFor(scene_type: SceneType) SceneTypeVTable {
 pub const SceneConfig = struct {
     width: i32 = 800,
     height: i32 = 450,
-    objects: []const ObjectConfig = &.{},
 
     scene_type: SceneType = .exploration,
 
@@ -76,12 +63,6 @@ pub const SceneConfig = struct {
 pub const Scene = struct {
     width: i32 = 800,
     height: i32 = 450,
-    camera: rl.Camera2D = rl.Camera2D{
-        .offset = .{ .x = 0, .y = 0 },
-        .target = .{ .x = 0, .y = 0 },
-        .rotation = 0,
-        .zoom = 1.0,
-    },
 
     scene_type: SceneType = .exploration,
 
@@ -94,16 +75,19 @@ pub const Scene = struct {
     message: ?[:0]const u8 = null,
     messageTimer: f32 = 0.0,
 
-    gameObjects: gameobjects.SceneGameObjects = gameobjects.SceneGameObjects.init(),
+    world: ecs.World = ecs.World.init(),
 
     const Self = @This();
 
     pub fn init(width: i32, height: i32) Scene {
-        return .{
+        var scene = Scene{
             .width = width,
             .height = height,
             .scene_type = .exploration,
         };
+        scene.world.bounds_width = @floatFromInt(width);
+        scene.world.bounds_height = @floatFromInt(height);
+        return scene;
     }
 
     fn vtable(self: *Self) SceneTypeVTable {
@@ -135,36 +119,45 @@ pub const Scene = struct {
         if (vt.onTransition) |f| f(self, mgr, dst_index);
     }
 
-    pub fn add(self: *Self, go: gameobjects.GameObject) void {
-        _ = self.gameObjects.addGameObject(go);
+    pub fn spawn(self: *Self) ecs.Entity {
+        return self.world.spawn();
     }
 
-    pub fn get(self: *Self, tag: []const u8) ?*gameobjects.GameObject {
-        return self.gameObjects.getGameObjectByTag(tag);
+    pub fn entity(self: *Self) ecs.EntityBuilder {
+        return ecs.EntityBuilder.init(&self.world);
     }
 
-    pub fn drawGameObjects(self: *Self) void {
-        self.gameObjects.draw();
+    pub fn findEntity(self: *Self, tag: []const u8) ?ecs.Entity {
+        return self.world.findByTag(tag);
     }
 
-    pub fn updatePlayer(self: *Self, dt: f32, paused: bool) void {
-        self.gameObjects.updatePlayer(dt, paused, self);
+    pub fn runSystems(self: *Self, dt: f32, paused: bool) void {
+        ecs.Systems.setPlayerPaused(&self.world, paused);
+        ecs.Systems.playerMovement(&self.world, dt);
+        ecs.Systems.cameraFollow(&self.world);
+        ecs.Systems.triggerCheck(&self.world);
+
+        if (self.world.message) |msg| {
+            self.message = msg;
+            self.messageTimer = self.world.message_timer;
+            self.world.message = null;
+        }
     }
 
-    pub fn checkTriggers(self: *Self, player_rect: rl.Rectangle) void {
-        self.gameObjects.checkAllTriggersWithPlayer(player_rect, self);
+    pub fn drawWorld(self: *Self) void {
+        ecs.Systems.render(&self.world);
     }
 
-    pub fn getCamera(self: *Self) ?rl.Camera2D {
-        return self.gameObjects.getCamera();
+    pub fn get(self: *Self, tag: []const u8) ?ecs.Entity {
+        return self.world.findByTag(tag);
     }
 
-    pub fn updateCamera(self: *Self, target: rl.Vector2) void {
-        self.gameObjects.updateCamera(target);
+    pub fn getCamera(self: *Self) !rl.Camera2D {
+        return ecs.Systems.getActiveCamera(&self.world);
     }
 
     pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
-        return self.gameObjects.getPlayerRect();
+        return ecs.Systems.getPlayerRect(&self.world);
     }
 };
 
@@ -197,62 +190,67 @@ pub const Builder = struct {
         rotation: f32 = 0.0,
         zoom: f32 = 1.0,
     }) *Builder {
-        self.scene.add(gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
-            .camera = .{
-                .offset = cam.offset,
-                .target = cam.target,
-                .rotation = cam.rotation,
-                .zoom = cam.zoom,
-            },
-        }));
+        var eb = self.scene.entity();
+        _ = eb.withTag(tag)
+            .withTransform(.{ .x = 0, .y = 0 })
+            .withCameraFull(.{
+            .offset = cam.offset,
+            .target = cam.target,
+            .rotation = cam.rotation,
+            .zoom = cam.zoom,
+        })
+            .build();
         return self;
     }
 
     pub fn player(self: *Builder, tag: []const u8, config: struct {
         texture: rl.Texture2D,
         speed: f32 = 100,
-        scale: f32 = 1.0,
         spawn: rl.Vector2,
     }) *Builder {
-        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
-            .player = .{
-                .texture = config.texture,
-                .speed = config.speed,
-                .sprite = .{
-                    .texture = config.texture,
-                    .x = config.spawn.x,
-                    .y = config.spawn.y,
-                },
-                .scale = config.scale,
-            },
-        });
-        go.position = config.spawn;
-        self.scene.add(go);
+        var eb = self.scene.entity();
+        const player_entity = eb.withTag(tag)
+            .withTransform(config.spawn)
+            .withSprite(config.texture)
+            .withPlayerController(config.speed)
+            .withBoxCollider(
+            @floatFromInt(config.texture.width),
+            @floatFromInt(config.texture.height),
+        )
+            .build();
+
+        if (self.scene.world.findByTag("main_camera")) |cam_entity| {
+            if (self.scene.world.cameras.get(cam_entity)) |cam| {
+                cam.follow_target = player_entity;
+            }
+        }
         return self;
     }
 
     pub fn circle(self: *Builder, tag: []const u8, pos: rl.Vector2, radius: f32, color: rl.Color) *Builder {
-        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
-            .circle = .{ .radius = radius, .color = color },
-        });
-        go.position = pos;
-        self.scene.add(go);
+        var eb = self.scene.entity();
+        _ = eb.withTag(tag)
+            .withTransform(pos)
+            .withCircle(radius, color)
+            .build();
         return self;
     }
 
     pub fn rect(self: *Builder, tag: []const u8, pos: rl.Vector2, size: rl.Vector2, color: rl.Color) *Builder {
-        var go = gameobjects.GameObject.init(tag, gameobjects.GameObjectData{
-            .rectangle = .{ .width = size.x, .height = size.y, .color = color },
-        });
-        go.position = pos;
-        self.scene.add(go);
+        var eb = self.scene.entity();
+        _ = eb.withTag(tag)
+            .withTransform(pos)
+            .withRect(size.x, size.y, color)
+            .build();
         return self;
     }
 
-    pub fn trigger(self: *Builder, tag: []const u8, bounds: rl.Rectangle, action: gameobjects.TriggerAction) *Builder {
-        if (self.scene.get(tag)) |go| {
-            go.addTrigger(bounds, action);
-        }
+    pub fn triggerZone(self: *Builder, tag: []const u8, bounds: rl.Rectangle, action: ecs.TriggerAction, one_shot: bool) *Builder {
+        var eb = self.scene.entity();
+        _ = eb.withTag(tag)
+            .withTransform(.{ .x = bounds.x, .y = bounds.y })
+            .withTrigger(bounds, action, one_shot)
+            .build();
         return self;
     }
 
@@ -343,14 +341,14 @@ pub const SceneManager = struct {
         if (index >= self.scenes.len) return;
         if (self.transitionState != .None) return;
 
-        const cs = self.currentScene();
-        if (cs.getCamera()) |cam| {
-            self.zoomStart = cam.zoom;
-        } else {
-            self.zoomStart = 1.0;
-        }
-
         self.cleanupCount = 0;
+
+        const cs = self.currentScene();
+        const cc = cs.getCamera() catch {
+            return;
+        };
+        self.zoomStart = cc.zoom;
+
         cs.dispatchOnTransition(self, index);
 
         self.zoomTarget = 1.5;
@@ -361,44 +359,88 @@ pub const SceneManager = struct {
     }
 
     pub fn changeScene(self: *SceneManager, index: usize) !void {
-        if (index >= self.capacity) return error.IndexOutOfBounds;
-        if (self.transitionState != .None) return error.TransitionInProgress;
+        if (index >= self.capacity) return;
+        if (self.transitionState != .None) return;
         self.lastIndex = self.currentIndex;
         self.startTransition(index);
     }
 
-    pub fn transferGameObject(self: *SceneManager, from: usize, to: usize, tag: []const u8) bool {
-        if (from >= self.scenes.len or to >= self.scenes.len) return false;
+    pub fn transferPersistentEntities(self: *SceneManager, from: usize, to: usize, tags: []const []const u8) void {
+        if (from >= self.scenes.len or to >= self.scenes.len) return;
 
-        const src = &self.scenes[from];
-        const dst = &self.scenes[to];
+        const src_world = &self.scenes[from].world;
+        const dst_world = &self.scenes[to].world;
 
-        {
-            var j: usize = 0;
-            while (j < dst.gameObjects.count) : (j += 1) {
-                if (std.mem.eql(u8, dst.gameObjects.gameObjects[j].getTag(), tag)) {
-                    dst.gameObjects.removeGameObject(j);
-                    break;
+        // First pass: transfer all entities
+        for (tags) |tag| {
+            self.transferSingleEntity(src_world, dst_world, tag);
+        }
+
+        // Second pass: re-link camera follow targets
+        var it = dst_world.cameras.iterator();
+        while (it.next()) |item| {
+            const cam = item.data;
+            if (!cam.follow_target.isValid()) {
+                if (dst_world.findByTag("player")) |player_entity| {
+                    cam.follow_target = player_entity;
                 }
             }
         }
 
-        var i: usize = 0;
-        while (i < src.gameObjects.count) : (i += 1) {
-            if (std.mem.eql(u8, src.gameObjects.gameObjects[i].getTag(), tag)) {
-                const moved = src.gameObjects.gameObjects[i];
-                src.gameObjects.removeGameObject(i);
-                dst.add(moved);
-                return true;
+        // Defer cleanup
+        for (tags) |tag| {
+            if (self.cleanupCount < self.objectsToCleanup.len) {
+                self.objectsToCleanup[self.cleanupCount] = tag;
+                self.cleanupCount += 1;
             }
         }
+    }
 
-        return false;
+    fn transferSingleEntity(self: *SceneManager, src_world: *ecs.World, dst_world: *ecs.World, tag: []const u8) void {
+        _ = self;
+
+        const src_entity = src_world.findByTag(tag) orelse return;
+
+        if (dst_world.findByTag(tag)) |existing| {
+            dst_world.despawn(existing);
+        }
+
+        const dst_entity = dst_world.spawn();
+
+        if (src_world.tags.get(src_entity)) |t| dst_world.tags.set(dst_entity, t.*);
+        if (src_world.transforms.get(src_entity)) |t| dst_world.transforms.set(dst_entity, t.*);
+        if (src_world.sprite_renderers.get(src_entity)) |t| dst_world.sprite_renderers.set(dst_entity, t.*);
+        if (src_world.circle_renderers.get(src_entity)) |t| dst_world.circle_renderers.set(dst_entity, t.*);
+        if (src_world.rect_renderers.get(src_entity)) |t| dst_world.rect_renderers.set(dst_entity, t.*);
+        if (src_world.player_controllers.get(src_entity)) |t| dst_world.player_controllers.set(dst_entity, t.*);
+        if (src_world.box_colliders.get(src_entity)) |t| dst_world.box_colliders.set(dst_entity, t.*);
+        if (src_world.actives.get(src_entity)) |t| dst_world.actives.set(dst_entity, t.*);
+
+        if (src_world.cameras.get(src_entity)) |cam| {
+            var new_cam = cam.*;
+            if (cam.follow_target.isValid()) {
+                new_cam.follow_target = ecs.Entity.INVALID;
+            }
+            dst_world.cameras.set(dst_entity, new_cam);
+        }
+
+        if (src_world.triggers.get(src_entity)) |trig| {
+            dst_world.triggers.set(dst_entity, trig.*);
+        }
     }
 
     pub fn cleanupTransferredObjects(self: *SceneManager, fromIdx: usize) void {
-        _ = self;
-        _ = fromIdx;
+        if (fromIdx >= self.scenes.len) return;
+        const src_world = &self.scenes[fromIdx].world;
+
+        var i: usize = 0;
+        while (i < self.cleanupCount) : (i += 1) {
+            const tag = self.objectsToCleanup[i];
+            if (src_world.findByTag(tag)) |entity| {
+                src_world.despawn(entity);
+            }
+        }
+        self.cleanupCount = 0;
     }
 
     pub fn update(self: *SceneManager, deltaTime: f32) void {
@@ -416,7 +458,7 @@ pub const SceneManager = struct {
             const zoomValue = std.math.lerp(self.zoomStart, self.zoomTarget, progress);
 
             const cs = self.currentScene();
-            cs.gameObjects.updateCameraZoom(zoomValue);
+            ecs.Systems.setCameraZoom(&cs.world, zoomValue);
 
             cs.dispatchUpdate(deltaTime);
 
@@ -441,11 +483,10 @@ pub const SceneManager = struct {
                 self.transitionTimer = 0.0;
                 self.transitionNextIndex = null;
                 self.inputBlocked = false;
-                self.currentScene().gameObjects.updateCameraZoom(1.0);
+                ecs.Systems.setCameraZoom(&self.currentScene().world, 1.0);
                 return;
             }
 
-            // Durante il fade-in, la scena visibile è quella nuova.
             const cs2 = self.currentScene();
             cs2.dispatchUpdate(deltaTime);
             return;

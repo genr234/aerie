@@ -1,17 +1,13 @@
 const rl = @import("raylib");
 const std = @import("std");
-const characters = @import("engine/characters.zig");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
-const gameobjects = @import("engine/gameobjects.zig");
-const sprites = @import("engine/sprites.zig");
-const root = @import("root.zig");
+const ecs = @import("engine/ecs.zig");
 
 fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) void {
     _ = scene;
-    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "player");
-    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "main_camera");
-    _ = manager.transferGameObject(manager.currentIndex, toSceneIndex, "origin_circle");
+    const tags = [_][]const u8{ "player", "origin_circle", "main_camera" };
+    manager.transferPersistentEntities(manager.currentIndex, toSceneIndex, &tags);
 }
 
 pub fn main() anyerror!void {
@@ -55,6 +51,7 @@ pub fn main() anyerror!void {
     var sceneBuilder = scenes.Builder.init(screenWidth, screenHeight);
 
     manager.scenes[0] = sceneBuilder
+        .onTransition(onSceneTransition)
         .camera("main_camera", .{
             .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
             .target = .{ .x = 0, .y = 0 },
@@ -68,9 +65,9 @@ pub fn main() anyerror!void {
         })
         .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
         .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
-        .trigger("trigger_zone", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, .{
+        .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, .{
             .start_dialogue = .{ .runner = &gameDialogue, .context = null },
-        })
+        }, false)
         .build();
 
     // Main game loop
@@ -105,47 +102,42 @@ pub fn main() anyerror!void {
         }
 
         if (rl.isKeyPressed(.r)) {
-            manager.scenes[manager.currentIndex+1] = sceneBuilder
-                .reset(sceneBuilder.scene.width, sceneBuilder.scene.height)
-                .camera("main_camera", .{
-                    .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
-                    .target = .{ .x = 0, .y = 0 },
-                    .rotation = 0,
-                    .zoom = 1.0,
-                })
-                .player("player", .{
-                    .texture = playerTexture,
-                    .speed = 100,
-                    .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
-                })
-                .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
-                .build();
-            manager.changeScene(manager.currentIndex+1) catch {};
+            const nextSceneIdx = manager.currentIndex + 1;
+            if (nextSceneIdx < 10) {
+                manager.scenes[nextSceneIdx] = sceneBuilder
+                    .reset(screenWidth, screenHeight)
+                    .onTransition(onSceneTransition)
+                    .build();
+                manager.changeScene(nextSceneIdx) catch {};
+            }
         }
 
         const currentScene = manager.currentScene();
 
-        currentScene.updatePlayer(deltaTime, gameDialogue.isActive());
+        // Use ECS systems directly
+        const isPaused = gameDialogue.isActive();
+        ecs.Systems.setPlayerPaused(&currentScene.world, isPaused);
+        ecs.Systems.playerMovement(&currentScene.world, deltaTime);
+        ecs.Systems.cameraFollow(&currentScene.world);
+        ecs.Systems.triggerCheck(&currentScene.world);
 
-        if (currentScene.getPlayerRect()) |playerRect| {
-            currentScene.checkTriggers(playerRect);
-
-            if (currentScene.get("player")) |playerGo| {
-                const targetPos = rl.Vector2{
-                    .x = playerGo.position.x + 16,
-                    .y = playerGo.position.y + 16,
-                };
-                currentScene.updateCamera(targetPos);
-            }
+        // Sync world message to scene
+        if (currentScene.world.message) |msg| {
+            currentScene.message = msg;
+            currentScene.messageTimer = currentScene.world.message_timer;
+            currentScene.world.message = null;
         }
 
         rl.beginDrawing();
         rl.clearBackground(.white);
 
-        const currentCamera = currentScene.getCamera() orelse currentScene.camera;
 
-        rl.beginMode2D(currentCamera);
-        currentScene.drawGameObjects();
+        const camera = ecs.Systems.getActiveCamera(&currentScene.world) catch {
+            std.process.abort();
+        };
+
+        rl.beginMode2D(camera);
+        ecs.Systems.render(&currentScene.world);
         rl.endMode2D();
 
         if (currentScene.messageTimer > 0.0) {
@@ -161,7 +153,7 @@ pub fn main() anyerror!void {
         };
         dialogue.draw(&gameDialogue, dialogueBounds, .{});
 
-        rl.drawText(rl.textFormat("Scene: %d", .{manager.currentIndex}), 10, 20, 20, .green);
+        rl.drawText(rl.textFormat("Scene: %d", .{manager.currentIndex}), 10, 10, 20, .green);
 
         manager.draw();
 
