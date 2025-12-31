@@ -138,6 +138,7 @@ pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
         const Self = @This();
 
         sparse: [CAPACITY]?u32 = [_]?u32{null} ** CAPACITY,
+        generations: [CAPACITY]u16 = [_]u16{0} ** CAPACITY,  // Track generation per slot
         dense_entities: [CAPACITY]u32 = undefined,
         dense_data: [CAPACITY]T = undefined,
         count: u32 = 0,
@@ -147,13 +148,17 @@ pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
         }
 
         pub fn set(self: *Self, entity: Entity, component: T) void {
-            if (entity.id >= MAX_ENTITIES) return;
+            if (entity.id >= CAPACITY) return;
 
             if (self.sparse[entity.id]) |dense_idx| {
-                self.dense_data[dense_idx] = component;
+                if (self.generations[entity.id] <= entity.generation) {
+                    self.dense_data[dense_idx] = component;
+                    self.generations[entity.id] = entity.generation;
+                }
             } else {
                 const idx = self.count;
                 self.sparse[entity.id] = idx;
+                self.generations[entity.id] = entity.generation;
                 self.dense_entities[idx] = entity.id;
                 self.dense_data[idx] = component;
                 self.count += 1;
@@ -161,7 +166,8 @@ pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
         }
 
         pub fn get(self: *Self, entity: Entity) ?*T {
-            if (entity.id >= MAX_ENTITIES) return null;
+            if (entity.id >= CAPACITY) return null;
+            if (self.generations[entity.id] != entity.generation) return null;
             if (self.sparse[entity.id]) |dense_idx| {
                 return &self.dense_data[dense_idx];
             }
@@ -169,7 +175,8 @@ pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
         }
 
         pub fn getConst(self: *const Self, entity: Entity) ?*const T {
-            if (entity.id >= MAX_ENTITIES) return null;
+            if (entity.id >= CAPACITY) return null;
+            if (self.generations[entity.id] != entity.generation) return null;
             if (self.sparse[entity.id]) |dense_idx| {
                 return &self.dense_data[dense_idx];
             }
@@ -673,7 +680,7 @@ pub const EntityBuilder = struct {
         return self;
     }
 
-    pub fn withSprite(self: *EntityBuilder, texture: rl.Texture2D) *EntityBuilder {
+    pub fn withSprite(self: *EntityBuilder, texture: rl.Texture) *EntityBuilder {
         self.world.sprite_renderers.set(self.entity, SpriteRenderer.init(texture));
         return self;
     }

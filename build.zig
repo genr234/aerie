@@ -12,7 +12,13 @@ pub fn build(b: *std.Build) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{});
+    var target = b.standardTargetOptions(.{});
+
+    // Fix emscripten target libc
+    if (target.query.os_tag == .emscripten) {
+        target.query.abi = null;
+    }
+
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
@@ -58,37 +64,43 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
-    const exe = b.addExecutable(.{
-        .name = "game_engine",
-        .root_module = b.createModule(.{
-            // b.createModule defines a new module just like b.addModule but,
-            // unlike b.addModule, it does not expose the module to consumers of
-            // this package, which is why in this case we don't have to give it a name.
-            .root_source_file = b.path("src/main.zig"),
-            // Target and optimization levels must be explicitly wired in when
-            // defining an executable or library (in the root module), and you
-            // can also hardcode a specific target for an executable or library
-            // definition if desireable (e.g. firmware for embedded devices).
-            .target = target,
-            .optimize = optimize,
-            // List of modules available for import in source files part of the
-            // root module.
-            .imports = &.{
-                // Here "game_engine" is the name you will use in your source code to
-                // import this module (e.g. `@import("game_engine")`). The name is
-                // repeated because you are allowed to rename your imports, which
-                // can be extremely useful in case of collisions (which can happen
-                // importing modules from different packages).
-                .{ .name = "game_engine", .module = mod },
-            },
-        }),
-    });
 
-    // This declares intent for the executable to be installed into the
-    // install prefix when running `zig build` (i.e. when executing the default
-    // step). By default the install prefix is `zig-out/` but can be overridden
-    // by passing `--prefix` or `-p`.
-    b.installArtifact(exe);
+    var exe: ?*std.Build.Step.Compile = null;
+
+    // Only create exe for non-emscripten targets
+    if (target.query.os_tag != .emscripten) {
+        exe = b.addExecutable(.{
+            .name = "game_engine",
+            .root_module = b.createModule(.{
+                // b.createModule defines a new module just like b.addModule but,
+                // unlike b.addModule, it does not expose the module to consumers of
+                // this package, which is why in this case we don't have to give it a name.
+                .root_source_file = b.path("src/main.zig"),
+                // Target and optimization levels must be explicitly wired in when
+                // defining an executable or library (in the root module), and you
+                // can also hardcode a specific target for an executable or library
+                // definition if desireable (e.g. firmware for embedded devices).
+                .target = target,
+                .optimize = optimize,
+                // List of modules available for import in source files part of the
+                // root module.
+                .imports = &.{
+                    // Here "game_engine" is the name you will use in your source code to
+                    // import this module (e.g. `@import("game_engine")`). The name is
+                    // repeated because you are allowed to rename your imports, which
+                    // can be extremely useful in case of collisions (which can happen
+                    // importing modules from different packages).
+                    .{ .name = "game_engine", .module = mod },
+                },
+            }),
+        });
+
+        // This declares intent for the executable to be installed into the
+        // install prefix when running `zig build` (i.e. when executing the default
+        // step). By default the install prefix is `zig-out/` but can be overridden
+        // by passing `--prefix` or `-p`.
+        b.installArtifact(exe.?);
+    }
 
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
@@ -97,23 +109,25 @@ pub fn build(b: *std.Build) void {
     // steps (e.g. a Run step, as we will see in a moment).
     const run_step = b.step("run", "Run the app");
 
-    // This creates a RunArtifact step in the build graph. A RunArtifact step
-    // invokes an executable compiled by Zig. Steps will only be executed by the
-    // runner if invoked directly by the user (in the case of top level steps)
-    // or if another step depends on it, so it's up to you to define when and
-    // how this Run step will be executed. In our case we want to run it when
-    // the user runs `zig build run`, so we create a dependency link.
-    const run_cmd = b.addRunArtifact(exe);
-    run_step.dependOn(&run_cmd.step);
+    if (exe != null) {
+        // This creates a RunArtifact step in the build graph. A RunArtifact step
+        // invokes an executable compiled by Zig. Steps will only be executed by the
+        // runner if invoked directly by the user (in the case of top level steps)
+        // or if another step depends on it, so it's up to you to define when and
+        // how this Run step will be executed. In our case we want to run it when
+        // the user runs `zig build run`, so we create a dependency link.
+        const run_cmd = b.addRunArtifact(exe.?);
+        run_step.dependOn(&run_cmd.step);
 
-    // By making the run step depend on the default step, it will be run from the
-    // installation directory rather than directly from within the cache directory.
-    run_cmd.step.dependOn(b.getInstallStep());
+        // By making the run step depend on the default step, it will be run from the
+        // installation directory rather than directly from within the cache directory.
+        run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+        // This allows the user to pass arguments to the application in the build
+        // command itself, like this: `zig build run -- arg1 arg2 etc`
+        if (b.args) |args| {
+            run_cmd.addArgs(args);
+        }
     }
 
     // Creates an executable that will run `test` blocks from the provided module.
@@ -129,19 +143,20 @@ pub fn build(b: *std.Build) void {
     // Creates an executable that will run `test` blocks from the executable's
     // root module. Note that test executables only test one module at a time,
     // hence why we have to create two separate ones.
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
 
-    // A run step that will run the second test executable.
-    const run_exe_tests = b.addRunArtifact(exe_tests);
-
-    // A top level step for running all tests. dependOn can be called multiple
-    // times and since the two run steps do not depend on one another, this will
-    // make the two of them run in parallel.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
+
+    if (exe != null) {
+        const exe_tests = b.addTest(.{
+            .root_module = exe.?.root_module,
+        });
+
+        // A run step that will run the second test executable.
+        const run_exe_tests = b.addRunArtifact(exe_tests);
+
+        test_step.dependOn(&run_exe_tests.step);
+    }
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
@@ -165,14 +180,31 @@ pub fn build(b: *std.Build) void {
 
     if (target.query.os_tag == .emscripten) {
         const emsdk = rlz.emsdk;
+
+        const wasm_optimize = if (optimize == .Debug) .ReleaseFast else optimize;
+
         const wasm = b.addLibrary(.{
             .name = "game_engine",
-            .root_module = mod,
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = wasm_optimize,
+                .imports = &.{
+                    .{ .name = "game_engine", .module = mod },
+                },
+            }),
         });
 
+        wasm.linkLibrary(raylib_artifact);
+        wasm.root_module.addImport("raylib", raylib);
+        wasm.root_module.addImport("raygui", raygui);
+
         const install_dir: std.Build.InstallDir = .{ .custom = "web" };
-        const emcc_flags = emsdk.emccDefaultFlags(b.allocator, .{ .optimize = optimize });
+        const default_emcc_flags = emsdk.emccDefaultFlags(b.allocator, .{ .optimize = optimize });
         const emcc_settings = emsdk.emccDefaultSettings(b.allocator, .{ .optimize = optimize });
+
+        var emcc_flags = default_emcc_flags.clone() catch @panic("OOM");
+        emcc_flags.put("--preload-file=assets@/assets", {}) catch @panic("OOM");
 
         const emcc_step = emsdk.emccStep(b, raylib_artifact, wasm, .{
             .optimize = optimize,
@@ -181,6 +213,15 @@ pub fn build(b: *std.Build) void {
             .install_dir = install_dir,
         });
         b.getInstallStep().dependOn(emcc_step);
+
+        // Copy assets to web directory
+        const copy_assets = b.addInstallDirectory(.{
+            .source_dir = b.path("assets"),
+            .install_dir = install_dir,
+            .install_subdir = "assets",
+        });
+
+        b.getInstallStep().dependOn(&copy_assets.step);
 
         const html_filename = std.fmt.allocPrint(b.allocator, "{s}.html", .{wasm.name}) catch {
             return;
@@ -195,7 +236,9 @@ pub fn build(b: *std.Build) void {
         run_step.dependOn(emrun_step);
     }
 
-    exe.linkLibrary(raylib_artifact);
-    exe.root_module.addImport("raylib", raylib);
-    exe.root_module.addImport("raygui", raygui);
+    if (exe != null) {
+        exe.?.linkLibrary(raylib_artifact);
+        exe.?.root_module.addImport("raylib", raylib);
+        exe.?.root_module.addImport("raygui", raygui);
+    }
 }

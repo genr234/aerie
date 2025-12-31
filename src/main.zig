@@ -1,8 +1,28 @@
 const rl = @import("raylib");
 const std = @import("std");
+const builtin = @import("builtin");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
 const ecs = @import("engine/ecs.zig");
+
+// Emscripten imports
+extern "c" fn emscripten_set_main_loop(func: *const fn () callconv(.c) void, fps: i32, simulate_infinite_loop: i32) void;
+
+const screenWidth = 800;
+const screenHeight = 450;
+
+const GameState = struct {
+    manager: scenes.SceneManager,
+    gameDialogue: dialogue.Runner,
+    playerTexture: rl.Texture2D,
+    allocator: std.mem.Allocator,
+    sceneBuilder: scenes.Builder,
+    script: dialogue.Script,
+    gpa: if (builtin.os.tag != .emscripten) std.heap.GeneralPurposeAllocator(.{}) else void,
+};
+
+var state: GameState = undefined;
+var initialized: bool = false;
 
 fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) void {
     _ = scene;
@@ -10,24 +30,29 @@ fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toScen
     manager.transferPersistentEntities(manager.currentIndex, toSceneIndex, &tags);
 }
 
-pub fn main() anyerror!void {
-    const screenWidth = 800;
-    const screenHeight = 450;
-
+fn init() !void {
     rl.initWindow(screenWidth, screenHeight, "Test Game");
-    defer rl.closeWindow();
 
     rl.setTargetFPS(60);
 
-    const playerTexture = try rl.loadTexture("assets/player.png");
-    defer rl.unloadTexture(playerTexture);
+    // Initialize allocator
+    if (builtin.os.tag == .emscripten) {
+        state.allocator = std.heap.c_allocator;
+        state.gpa = {};
+    } else {
+        state.gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        state.allocator = state.gpa.allocator();
+    }
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var allocator = gpa.allocator();
+    // Load assets
+    const player_path = if (builtin.os.tag == .emscripten) "/assets/player.png" else "assets/player.png";
+    state.playerTexture = rl.loadTexture(player_path) catch |err| {
+        std.debug.print("Failed to load texture: {s}\n", .{player_path});
+        return err;
+    };
 
     // Setup Dialogue
-    var builder = dialogue.Builder.init(allocator);
+    var builder = dialogue.Builder.init(state.allocator);
     defer builder.deinit();
 
     _ = builder.say("Narrator", "Hello!");
@@ -39,18 +64,13 @@ pub fn main() anyerror!void {
     _ = builder.say("Narrator", "The end.");
     _ = builder.done();
 
-    var script = try builder.build();
-    defer script.deinit();
+    state.script = try builder.build();
+    state.gameDialogue = dialogue.Runner.init(state.allocator, &state.script);
 
-    var gameDialogue = dialogue.Runner.init(allocator, &script);
-    defer gameDialogue.deinit();
+    state.manager = try scenes.SceneManager.initWithAllocator(&state.allocator, 10);
+    state.sceneBuilder = scenes.Builder.init(screenWidth, screenHeight);
 
-    var manager = try scenes.SceneManager.initWithAllocator(&allocator, 10);
-    defer manager.deinit();
-
-    var sceneBuilder = scenes.Builder.init(screenWidth, screenHeight);
-
-    manager.scenes[0] = sceneBuilder
+    state.manager.scenes[0] = state.sceneBuilder
         .onTransition(onSceneTransition)
         .camera("main_camera", .{
             .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
@@ -59,105 +79,149 @@ pub fn main() anyerror!void {
             .zoom = 1.0,
         })
         .player("player", .{
-            .texture = playerTexture,
+            .texture = state.playerTexture,
             .speed = 100,
             .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
         })
         .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
         .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
         .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, .{
-            .start_dialogue = .{ .runner = &gameDialogue, .context = null },
+            .start_dialogue = .{ .runner = &state.gameDialogue, .context = null },
         }, false)
         .build();
 
-    // Main game loop
-    while (!rl.windowShouldClose()) {
-        const deltaTime = rl.getFrameTime();
+    initialized = true;
+}
 
-        manager.update(deltaTime);
-        gameDialogue.update(deltaTime);
+fn deinit() void {
+    if (!initialized) return;
 
-        // Handle dialogue input
-        if (gameDialogue.isActive()) {
-            if (rl.isKeyPressed(.space)) {
-                gameDialogue.skip();
-                gameDialogue.advance();
-            }
+    state.manager.deinit();
+    state.gameDialogue.deinit();
+    state.script.deinit();
+    rl.unloadTexture(state.playerTexture);
+    rl.closeWindow();
 
-            if (gameDialogue.currentNode()) |node| {
-                if (node.tag == .ask) {
-                    if (rl.isKeyPressed(.up)) gameDialogue.selectUp();
-                    if (rl.isKeyPressed(.down)) gameDialogue.selectDown();
-                } else if (node.tag == .input) {
-                    // Handle text input
-                    const key = rl.getCharPressed();
-                    if (key > 0 and key < 127) {
-                        gameDialogue.typeChar(@intCast(key));
-                    }
-                    if (rl.isKeyPressed(.backspace)) {
-                        gameDialogue.backspace();
-                    }
+    if (builtin.os.tag != .emscripten) {
+        _ = state.gpa.deinit();
+    }
+}
+
+fn update() !void {
+    if (!initialized) return;
+
+    const deltaTime = rl.getFrameTime();
+
+    state.manager.update(deltaTime);
+    state.gameDialogue.update(deltaTime);
+
+    // Handle dialogue input
+    if (state.gameDialogue.isActive()) {
+        if (rl.isKeyPressed(.space)) {
+            state.gameDialogue.skip();
+            state.gameDialogue.advance();
+        }
+
+        if (state.gameDialogue.currentNode()) |node| {
+            if (node.tag == .ask) {
+                if (rl.isKeyPressed(.up)) state.gameDialogue.selectUp();
+                if (rl.isKeyPressed(.down)) state.gameDialogue.selectDown();
+            } else if (node.tag == .input) {
+                // Handle text input
+                const key = rl.getCharPressed();
+                if (key > 0 and key < 127) {
+                    state.gameDialogue.typeChar(@intCast(key));
+                }
+                if (rl.isKeyPressed(.backspace)) {
+                    state.gameDialogue.backspace();
                 }
             }
         }
+    }
 
-        if (rl.isKeyPressed(.r)) {
-            const nextSceneIdx = manager.currentIndex + 1;
-            if (nextSceneIdx < 10) {
-                manager.scenes[nextSceneIdx] = sceneBuilder
-                    .reset(screenWidth, screenHeight)
-                    .onTransition(onSceneTransition)
-                    .build();
-                manager.changeScene(nextSceneIdx) catch {};
-            }
+    if (rl.isKeyPressed(.r)) {
+        const nextSceneIdx = state.manager.currentIndex + 1;
+        if (nextSceneIdx < 10) {
+            state.manager.scenes[nextSceneIdx] = state.sceneBuilder
+                .reset(screenWidth, screenHeight)
+                .onTransition(onSceneTransition)
+                .build();
+            state.manager.changeScene(nextSceneIdx) catch {};
         }
+    }
 
-        const currentScene = manager.currentScene();
+    const currentScene = state.manager.currentScene();
 
-        // Use ECS systems directly
-        const isPaused = gameDialogue.isActive();
-        ecs.Systems.setPlayerPaused(&currentScene.world, isPaused);
-        ecs.Systems.playerMovement(&currentScene.world, deltaTime);
-        ecs.Systems.cameraFollow(&currentScene.world);
-        ecs.Systems.triggerCheck(&currentScene.world);
+    // Use ECS systems directly
+    const isPaused = state.gameDialogue.isActive();
+    ecs.Systems.setPlayerPaused(&currentScene.world, isPaused);
+    ecs.Systems.playerMovement(&currentScene.world, deltaTime);
+    ecs.Systems.cameraFollow(&currentScene.world);
+    ecs.Systems.triggerCheck(&currentScene.world);
 
-        // Sync world message to scene
-        if (currentScene.world.message) |msg| {
-            currentScene.message = msg;
-            currentScene.messageTimer = currentScene.world.message_timer;
-            currentScene.world.message = null;
-        }
+    // Sync world message to scene
+    if (currentScene.world.message) |msg| {
+        currentScene.message = msg;
+        currentScene.messageTimer = currentScene.world.message_timer;
+        currentScene.world.message = null;
+    }
+}
 
-        rl.beginDrawing();
-        rl.clearBackground(.white);
+fn draw() void {
+    if (!initialized) return;
 
+    rl.beginDrawing();
+    rl.clearBackground(.white);
 
-        const camera = ecs.Systems.getActiveCamera(&currentScene.world) catch {
-            std.process.abort();
-        };
+    const currentScene = state.manager.currentScene();
+    const deltaTime = rl.getFrameTime();
 
+    if (ecs.Systems.getActiveCamera(&currentScene.world)) |camera| {
         rl.beginMode2D(camera);
         ecs.Systems.render(&currentScene.world);
         rl.endMode2D();
+    } else |_| {
+        rl.drawText("No Active Camera!", 200, 200, 30, rl.Color.red);
+    }
 
-        if (currentScene.messageTimer > 0.0) {
-            if (currentScene.message) |msg| rl.drawText(msg, 10, 10, 20, .red);
-            currentScene.messageTimer -= deltaTime;
+    if (currentScene.messageTimer > 0.0) {
+        if (currentScene.message) |msg| rl.drawText(msg, 10, 10, 20, .red);
+        currentScene.messageTimer -= deltaTime;
+    }
+
+    const dialogueBounds = rl.Rectangle{
+        .x = 20,
+        .y = screenHeight - 120,
+        .width = screenWidth - 40,
+        .height = 100,
+    };
+    dialogue.draw(&state.gameDialogue, dialogueBounds, .{});
+
+    rl.drawText(rl.textFormat("Scene: %d", .{state.manager.currentIndex}), 10, 10, 20, .green);
+
+    state.manager.draw();
+
+    rl.endDrawing();
+}
+
+fn gameLoop() callconv(.c) void {
+    update() catch |err| {
+        std.debug.print("Update error: {}\n", .{err});
+    };
+    draw();
+}
+
+pub fn main() !void {
+    try init();
+
+    if (builtin.os.tag == .emscripten) {
+        emscripten_set_main_loop(gameLoop, 0, 1);
+    } else {
+        while (!rl.windowShouldClose()) {
+            try update();
+            draw();
         }
-
-        const dialogueBounds = rl.Rectangle{
-            .x = 20,
-            .y = screenHeight - 120,
-            .width = screenWidth - 40,
-            .height = 100,
-        };
-        dialogue.draw(&gameDialogue, dialogueBounds, .{});
-
-        rl.drawText(rl.textFormat("Scene: %d", .{manager.currentIndex}), 10, 10, 20, .green);
-
-        manager.draw();
-
-        rl.endDrawing();
+        deinit();
     }
 }
 
