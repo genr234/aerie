@@ -527,3 +527,32 @@ fn measureText(text: []const u8, size: i32) i32 {
     buf[len] = 0;
     return rl.measureText(&buf, size);
 }
+
+pub fn handleInput(runner: *Runner) void {
+    if (!runner.isActive()) return;
+
+    // advance / skip typing
+    if (rl.isKeyPressed(.space)) {
+        runner.skip();
+        runner.advance();
+    }
+
+    const node = runner.currentNode() orelse return;
+
+    switch (node.tag) {
+        .ask => {
+            if (rl.isKeyPressed(.up)) runner.selectUp();
+            if (rl.isKeyPressed(.down)) runner.selectDown();
+        },
+        .input => {
+            const key = rl.getCharPressed();
+            if (key > 0 and key < 127) {
+                runner.typeChar(@intCast(key));
+            }
+            if (rl.isKeyPressed(.backspace)) {
+                runner.backspace();
+            }
+        },
+        else => {},
+    }
+}

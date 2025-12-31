@@ -115,29 +115,7 @@ fn update() !void {
     state.manager.update(deltaTime);
     state.gameDialogue.update(deltaTime);
 
-    // Handle dialogue input
-    if (state.gameDialogue.isActive()) {
-        if (rl.isKeyPressed(.space)) {
-            state.gameDialogue.skip();
-            state.gameDialogue.advance();
-        }
-
-        if (state.gameDialogue.currentNode()) |node| {
-            if (node.tag == .ask) {
-                if (rl.isKeyPressed(.up)) state.gameDialogue.selectUp();
-                if (rl.isKeyPressed(.down)) state.gameDialogue.selectDown();
-            } else if (node.tag == .input) {
-                // Handle text input
-                const key = rl.getCharPressed();
-                if (key > 0 and key < 127) {
-                    state.gameDialogue.typeChar(@intCast(key));
-                }
-                if (rl.isKeyPressed(.backspace)) {
-                    state.gameDialogue.backspace();
-                }
-            }
-        }
-    }
+    dialogue.handleInput(&state.gameDialogue);
 
     if (rl.isKeyPressed(.r)) {
         const nextSceneIdx = state.manager.currentIndex + 1;
@@ -152,19 +130,8 @@ fn update() !void {
 
     const currentScene = state.manager.currentScene();
 
-    // Use ECS systems directly
-    const isPaused = state.gameDialogue.isActive();
-    ecs.Systems.setPlayerPaused(&currentScene.world, isPaused);
-    ecs.Systems.playerMovement(&currentScene.world, deltaTime);
-    ecs.Systems.cameraFollow(&currentScene.world);
-    ecs.Systems.triggerCheck(&currentScene.world);
-
-    // Sync world message to scene
-    if (currentScene.world.message) |msg| {
-        currentScene.message = msg;
-        currentScene.messageTimer = currentScene.world.message_timer;
-        currentScene.world.message = null;
-    }
+    const isPaused = state.gameDialogue.isActive() or state.manager.inputBlocked;
+    currentScene.runSystems(deltaTime, isPaused);
 }
 
 fn draw() void {
@@ -224,4 +191,3 @@ pub fn main() !void {
         deinit();
     }
 }
-
