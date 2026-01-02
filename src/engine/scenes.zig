@@ -136,12 +136,7 @@ pub const Scene = struct {
         ecs.Systems.playerMovement(&self.world, dt);
         ecs.Systems.cameraFollow(&self.world);
         ecs.Systems.triggerCheck(&self.world);
-
-        if (self.world.message) |msg| {
-            self.message = msg;
-            self.messageTimer = self.world.message_timer;
-            self.world.message = null;
-        }
+        ecs.Systems.handleEvents(&self.world, dt);
     }
 
     pub fn drawWorld(self: *Self) void {

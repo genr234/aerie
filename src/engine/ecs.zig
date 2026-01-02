@@ -2,6 +2,7 @@ const std = @import("std");
 const rl = @import("raylib");
 const dialogue = @import("dialogue.zig");
 const sprites = @import("sprites.zig");
+const events = @import("events.zig");
 
 pub const Entity = struct {
     id: u32,
@@ -244,6 +245,8 @@ pub const World = struct {
     free_count: u32 = 0,
     entity_count: u32 = 0,
 
+    events: events.EventQueue,
+
     tags: ComponentStorage(TagComponent, MAX_ENTITIES) = .{},
     transforms: ComponentStorage(Transform, MAX_ENTITIES) = .{},
     sprite_renderers: ComponentStorage(SpriteRenderer, MAX_ENTITIES) = .{},
@@ -258,11 +261,10 @@ pub const World = struct {
     bounds_width: f32 = 800,
     bounds_height: f32 = 450,
 
-    message: ?[:0]const u8 = null,
-    message_timer: f32 = 0,
-
     pub fn init() Self {
-        return .{};
+        return .{
+            .events = events.EventQueue.init()
+        };
     }
 
     pub fn entityFromId(self: *const Self, entity_id: u32) Entity {
@@ -372,6 +374,10 @@ pub const World = struct {
 };
 
 pub const Systems = struct {
+    pub fn handleEvents(world: *World, dt: f32) void {
+        world.events.handleEvents(dt);
+    }
+
     pub fn playerMovement(world: *World, dt: f32) void {
         var it = world.player_controllers.iterator();
         while (it.next()) |item| {
@@ -505,8 +511,7 @@ pub const Systems = struct {
                 switch (trigger.action) {
                     .print_message => |buf| {
                         const len = std.mem.indexOfScalar(u8, &buf, 0) orelse buf.len;
-                        world.message = buf[0..len :0];
-                        world.message_timer = 2.0;
+                        world.events.push(events.showMessage(buf[0..len], 2.0)) catch {};
                     },
                     .start_dialogue => |payload| {
                         payload.runner.start(payload.context);
