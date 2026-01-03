@@ -85,7 +85,7 @@ fn init() !void {
         })
         .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
         .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
-        .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, ecs.TriggerPrintAction("You have entered the dialogue zone!"), false)
+        .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, ecs.TriggerDialogueStart(&state.gameDialogue, null), false)
         .build();
 
     initialized = true;

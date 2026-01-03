@@ -102,6 +102,15 @@ pub fn TriggerPrintAction(msg: []const u8) TriggerAction {
     return action;
 }
 
+pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque) TriggerAction {
+    return TriggerAction{
+        .start_dialogue = .{
+            .runner = runner,
+            .context = context,
+        },
+    };
+}
+
 pub const Trigger = struct {
     bounds: rl.Rectangle,
     action: TriggerAction,
