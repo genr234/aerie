@@ -143,81 +143,107 @@ pub const Active = struct {
     value: bool = true,
 };
 
-pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
+pub fn ComponentStorage(comptime T: type) type {
     return struct {
         const Self = @This();
 
-        sparse: [CAPACITY]?u32 = [_]?u32{null} ** CAPACITY,
-        generations: [CAPACITY]u16 = [_]u16{0} ** CAPACITY,  // Track generation per slot
-        dense_entities: [CAPACITY]u32 = undefined,
-        dense_data: [CAPACITY]T = undefined,
-        count: u32 = 0,
+        /// sparse maps entity_id -> dense index
+        sparse: std.ArrayListUnmanaged(?u32) = .{},
+        generations: std.ArrayListUnmanaged(u16) = .{},
 
-        pub fn init() Self {
-            return .{};
+        dense_entities: std.ArrayListUnmanaged(u32) = .{},
+        dense_data: std.ArrayListUnmanaged(T) = .{},
+
+        pub fn init(self: *Self, allocator: std.mem.Allocator, initial_capacity: usize) !void {
+            try self.ensureEntityCapacity(allocator, initial_capacity);
+            try self.dense_entities.ensureTotalCapacity(allocator, initial_capacity);
+            try self.dense_data.ensureTotalCapacity(allocator, initial_capacity);
         }
 
-        pub fn set(self: *Self, entity: Entity, component: T) void {
-            if (entity.id >= CAPACITY) return;
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            self.sparse.deinit(allocator);
+            self.generations.deinit(allocator);
+            self.dense_entities.deinit(allocator);
+            self.dense_data.deinit(allocator);
+        }
 
-            if (self.sparse[entity.id]) |dense_idx| {
-                if (self.generations[entity.id] <= entity.generation) {
-                    self.dense_data[dense_idx] = component;
-                    self.generations[entity.id] = entity.generation;
-                }
-            } else {
-                const idx = self.count;
-                self.sparse[entity.id] = idx;
-                self.generations[entity.id] = entity.generation;
-                self.dense_entities[idx] = entity.id;
-                self.dense_data[idx] = component;
-                self.count += 1;
+        fn ensureEntityCapacity(self: *Self, allocator: std.mem.Allocator, entity_capacity: usize) !void {
+            if (self.sparse.items.len >= entity_capacity) return;
+
+            const old_len = self.sparse.items.len;
+            try self.sparse.resize(allocator, entity_capacity);
+            for (old_len..entity_capacity) |i| self.sparse.items[i] = null;
+
+            const old_glen = self.generations.items.len;
+            try self.generations.resize(allocator, entity_capacity);
+            for (old_glen..entity_capacity) |i| self.generations.items[i] = 0;
+        }
+
+        pub fn clear(self: *Self) void {
+            // Only clear the dense sets; sparse stays allocated and is reset for used indices.
+            for (self.dense_entities.items) |eid| {
+                if (eid < self.sparse.items.len) self.sparse.items[eid] = null;
             }
+            self.dense_entities.items.len = 0;
+            self.dense_data.items.len = 0;
+        }
+
+        pub fn set(self: *Self, allocator: std.mem.Allocator, entity: Entity, component: T) !void {
+            try self.ensureEntityCapacity(allocator, @as(usize, entity.id) + 1);
+
+            if (self.sparse.items[entity.id]) |dense_idx| {
+                if (self.generations.items[entity.id] <= entity.generation) {
+                    self.dense_data.items[dense_idx] = component;
+                    self.generations.items[entity.id] = entity.generation;
+                }
+                return;
+            }
+
+            const idx: u32 = @intCast(self.dense_entities.items.len);
+            try self.dense_entities.append(allocator, entity.id);
+            try self.dense_data.append(allocator, component);
+            self.sparse.items[entity.id] = idx;
+            self.generations.items[entity.id] = entity.generation;
         }
 
         pub fn get(self: *Self, entity: Entity) ?*T {
-            if (entity.id >= CAPACITY) return null;
-            if (self.generations[entity.id] != entity.generation) return null;
-            if (self.sparse[entity.id]) |dense_idx| {
-                return &self.dense_data[dense_idx];
+            if (entity.id >= self.sparse.items.len) return null;
+            if (self.generations.items[entity.id] != entity.generation) return null;
+            if (self.sparse.items[entity.id]) |dense_idx| {
+                return &self.dense_data.items[dense_idx];
             }
             return null;
         }
 
         pub fn getConst(self: *const Self, entity: Entity) ?*const T {
-            if (entity.id >= CAPACITY) return null;
-            if (self.generations[entity.id] != entity.generation) return null;
-            if (self.sparse[entity.id]) |dense_idx| {
-                return &self.dense_data[dense_idx];
+            if (entity.id >= self.sparse.items.len) return null;
+            if (self.generations.items[entity.id] != entity.generation) return null;
+            if (self.sparse.items[entity.id]) |dense_idx| {
+                return &self.dense_data.items[dense_idx];
             }
             return null;
         }
 
         pub fn has(self: *const Self, entity: Entity) bool {
-            if (entity.id >= MAX_ENTITIES) return false;
-            return self.sparse[entity.id] != null;
+            if (entity.id >= self.sparse.items.len) return false;
+            return self.sparse.items[entity.id] != null;
         }
 
         pub fn remove(self: *Self, entity: Entity) void {
-            if (entity.id >= MAX_ENTITIES) return;
-            if (self.sparse[entity.id]) |dense_idx| {
-                const last_idx = self.count - 1;
-                if (dense_idx != last_idx) {
-                    const last_entity = self.dense_entities[last_idx];
-                    self.dense_entities[dense_idx] = last_entity;
-                    self.dense_data[dense_idx] = self.dense_data[last_idx];
-                    self.sparse[last_entity] = dense_idx;
-                }
-                self.sparse[entity.id] = null;
-                self.count -= 1;
-            }
-        }
+            if (entity.id >= self.sparse.items.len) return;
+            const dense_idx = self.sparse.items[entity.id] orelse return;
 
-        pub fn clear(self: *Self) void {
-            for (0..self.count) |i| {
-                self.sparse[self.dense_entities[i]] = null;
+            const last_idx: u32 = @intCast(self.dense_entities.items.len - 1);
+            if (dense_idx != last_idx) {
+                const last_eid = self.dense_entities.items[last_idx];
+                self.dense_entities.items[dense_idx] = last_eid;
+                self.dense_data.items[dense_idx] = self.dense_data.items[last_idx];
+                self.sparse.items[last_eid] = dense_idx;
             }
-            self.count = 0;
+
+            self.sparse.items[entity.id] = null;
+            _ = self.dense_entities.pop();
+            _ = self.dense_data.pop();
         }
 
         pub fn iterator(self: *Self) Iterator {
@@ -229,77 +255,144 @@ pub fn ComponentStorage(comptime T: type, comptime CAPACITY: usize) type {
             index: u32,
 
             pub fn next(self: *Iterator) ?struct { entity_id: u32, data: *T } {
-                if (self.index >= self.storage.count) return null;
-                const entity_id = self.storage.dense_entities[self.index];
-                const data = &self.storage.dense_data[self.index];
+                if (self.index >= self.storage.dense_entities.items.len) return null;
+                const entity_id = self.storage.dense_entities.items[self.index];
+                const data = &self.storage.dense_data.items[self.index];
                 self.index += 1;
-                return .{
-                    .entity_id = entity_id,
-                    .data = data,
-                };
+                return .{ .entity_id = entity_id, .data = data };
             }
         };
     };
 }
 
-pub const MAX_ENTITIES: usize = 256;
-
 pub const World = struct {
     const Self = @This();
 
-    entity_generations: [MAX_ENTITIES]u16 = [_]u16{0} ** MAX_ENTITIES,
-    entity_alive: [MAX_ENTITIES]bool = [_]bool{false} ** MAX_ENTITIES,
-    next_entity_id: u32 = 0,
-    free_list: [MAX_ENTITIES]u32 = undefined,
-    free_count: u32 = 0,
+    allocator: std.mem.Allocator,
+
+    entity_generations: std.ArrayListUnmanaged(u16) = .{},
+    entity_alive: std.ArrayListUnmanaged(bool) = .{},
+
+    free_list: std.ArrayListUnmanaged(u32) = .{},
     entity_count: u32 = 0,
 
     events: events.EventQueue,
 
-    tags: ComponentStorage(TagComponent, MAX_ENTITIES) = .{},
-    transforms: ComponentStorage(Transform, MAX_ENTITIES) = .{},
-    sprite_renderers: ComponentStorage(SpriteRenderer, MAX_ENTITIES) = .{},
-    circle_renderers: ComponentStorage(CircleRenderer, MAX_ENTITIES) = .{},
-    rect_renderers: ComponentStorage(RectRenderer, MAX_ENTITIES) = .{},
-    player_controllers: ComponentStorage(PlayerController, MAX_ENTITIES) = .{},
-    cameras: ComponentStorage(Camera, MAX_ENTITIES) = .{},
-    triggers: ComponentStorage(Trigger, MAX_ENTITIES) = .{},
-    box_colliders: ComponentStorage(BoxCollider, MAX_ENTITIES) = .{},
-    actives: ComponentStorage(Active, MAX_ENTITIES) = .{},
+    tags: ComponentStorage(TagComponent) = .{},
+    transforms: ComponentStorage(Transform) = .{},
+    sprite_renderers: ComponentStorage(SpriteRenderer) = .{},
+    circle_renderers: ComponentStorage(CircleRenderer) = .{},
+    rect_renderers: ComponentStorage(RectRenderer) = .{},
+    player_controllers: ComponentStorage(PlayerController) = .{},
+    cameras: ComponentStorage(Camera) = .{},
+    triggers: ComponentStorage(Trigger) = .{},
+    box_colliders: ComponentStorage(BoxCollider) = .{},
+    actives: ComponentStorage(Active) = .{},
 
     bounds_width: f32 = 800,
     bounds_height: f32 = 450,
 
-    pub fn init() Self {
-        return .{
-            .events = events.EventQueue.init()
+    max_entities: usize = 0,
+
+    pub fn init(allocator: std.mem.Allocator, max_entities: usize) !Self {
+        var self = Self{
+            .allocator = allocator,
+            .events = events.EventQueue.init(),
+            .max_entities = max_entities,
         };
+
+        try self.entity_generations.resize(allocator, max_entities);
+        @memset(self.entity_generations.items, 0);
+
+        try self.entity_alive.resize(allocator, max_entities);
+        @memset(self.entity_alive.items, false);
+
+        try self.free_list.ensureTotalCapacity(allocator, max_entities);
+
+        try self.tags.init(allocator, max_entities);
+        try self.transforms.init(allocator, max_entities);
+        try self.sprite_renderers.init(allocator, max_entities);
+        try self.circle_renderers.init(allocator, max_entities);
+        try self.rect_renderers.init(allocator, max_entities);
+        try self.player_controllers.init(allocator, max_entities);
+        try self.cameras.init(allocator, max_entities);
+        try self.triggers.init(allocator, max_entities);
+        try self.box_colliders.init(allocator, max_entities);
+        try self.actives.init(allocator, max_entities);
+
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.tags.deinit(self.allocator);
+        self.transforms.deinit(self.allocator);
+        self.sprite_renderers.deinit(self.allocator);
+        self.circle_renderers.deinit(self.allocator);
+        self.rect_renderers.deinit(self.allocator);
+        self.player_controllers.deinit(self.allocator);
+        self.cameras.deinit(self.allocator);
+        self.triggers.deinit(self.allocator);
+        self.box_colliders.deinit(self.allocator);
+        self.actives.deinit(self.allocator);
+
+        self.entity_generations.deinit(self.allocator);
+        self.entity_alive.deinit(self.allocator);
+        self.free_list.deinit(self.allocator);
+    }
+
+    fn ensureCapacity(self: *Self, new_capacity: usize) !void {
+        if (self.max_entities >= new_capacity) return;
+
+        const old_cap = self.max_entities;
+        self.max_entities = @max(new_capacity, old_cap * 2);
+
+        try self.entity_generations.resize(self.allocator, self.max_entities);
+        for (old_cap..self.max_entities) |i| self.entity_generations.items[i] = 0;
+
+        try self.entity_alive.resize(self.allocator, self.max_entities);
+        for (old_cap..self.max_entities) |i| self.entity_alive.items[i] = false;
+
+        try self.tags.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.transforms.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.sprite_renderers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.circle_renderers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.rect_renderers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.player_controllers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.cameras.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.triggers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.box_colliders.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.actives.ensureEntityCapacity(self.allocator, self.max_entities);
     }
 
     pub fn entityFromId(self: *const Self, entity_id: u32) Entity {
-        if (entity_id >= MAX_ENTITIES) return Entity.INVALID;
-        return .{ .id = entity_id, .generation = self.entity_generations[entity_id] };
+        if (entity_id >= self.max_entities) return Entity.INVALID;
+        return .{ .id = entity_id, .generation = self.entity_generations.items[entity_id] };
     }
 
     pub fn spawn(self: *Self) Entity {
         var entity_id: u32 = undefined;
 
-        if (self.free_count > 0) {
-            self.free_count -= 1;
-            entity_id = self.free_list[self.free_count];
+        if (self.free_list.items.len > 0) {
+            entity_id = self.free_list.pop();
         } else {
-            if (self.next_entity_id >= MAX_ENTITIES) {
-                return Entity.INVALID;
+            entity_id = @intCast(self.entity_alive.items.len);
+            // If we're at capacity, grow.
+            if (entity_id >= self.max_entities) {
+                self.ensureCapacity(@as(usize, entity_id) + 1) catch return Entity.INVALID;
             }
-            entity_id = self.next_entity_id;
-            self.next_entity_id += 1;
         }
 
-        self.entity_alive[entity_id] = true;
+        if (entity_id >= self.entity_alive.items.len) {
+            // In practice entity_alive tracks max_entities; keep it consistent.
+            // But be defensive if old data structures assumed fixed.
+            _ = self.ensureCapacity(@as(usize, entity_id) + 1) catch return Entity.INVALID;
+        }
+
+        self.entity_alive.items[entity_id] = true;
         self.entity_count += 1;
 
-        const entity = Entity{ .id = entity_id, .generation = self.entity_generations[entity_id] };
-        self.actives.set(entity, .{ .value = true });
+        const entity = Entity{ .id = entity_id, .generation = self.entity_generations.items[entity_id] };
+        self.actives.set(self.allocator, entity, .{ .value = true }) catch {};
 
         return entity;
     }
@@ -317,18 +410,16 @@ pub const World = struct {
         self.triggers.remove(entity);
         self.box_colliders.remove(entity);
         self.actives.remove(entity);
-        // Mark as dead and increment generation
-        self.entity_alive[entity.id] = false;
-        self.entity_generations[entity.id] += 1;
-        self.free_list[self.free_count] = entity.id;
-        self.free_count += 1;
+
+        self.entity_alive.items[entity.id] = false;
+        self.entity_generations.items[entity.id] += 1;
+        self.free_list.append(self.allocator, entity.id) catch {};
         self.entity_count -= 1;
     }
 
     pub fn isAlive(self: *const Self, entity: Entity) bool {
-        if (entity.id >= MAX_ENTITIES) return false;
-        return self.entity_alive[entity.id] and
-            self.entity_generations[entity.id] == entity.generation;
+        if (entity.id >= self.max_entities) return false;
+        return self.entity_alive.items[entity.id] and self.entity_generations.items[entity.id] == entity.generation;
     }
 
     pub fn isActive(self: *Self, entity: Entity) bool {
@@ -370,14 +461,14 @@ pub const World = struct {
         self.box_colliders.clear();
         self.actives.clear();
 
-        for (0..MAX_ENTITIES) |i| {
-            if (self.entity_alive[i]) {
-                self.entity_generations[i] += 1;
+        for (0..self.max_entities) |i| {
+            if (self.entity_alive.items[i]) {
+                self.entity_generations.items[i] += 1;
             }
-            self.entity_alive[i] = false;
+            self.entity_alive.items[i] = false;
         }
-        self.next_entity_id = 0;
-        self.free_count = 0;
+
+        self.free_list.items.len = 0;
         self.entity_count = 0;
     }
 };
@@ -680,64 +771,64 @@ pub const EntityBuilder = struct {
     }
 
     pub fn withTag(self: *EntityBuilder, name: []const u8) *EntityBuilder {
-        self.world.tags.set(self.entity, TagComponent.init(name));
+        self.world.tags.set(self.world.allocator, self.entity, TagComponent.init(name)) catch {};
         return self;
     }
 
     pub fn withTransform(self: *EntityBuilder, pos: rl.Vector2) *EntityBuilder {
-        self.world.transforms.set(self.entity, .{ .position = pos });
+        self.world.transforms.set(self.world.allocator, self.entity, .{ .position = pos }) catch {};
         return self;
     }
 
     pub fn withTransformFull(self: *EntityBuilder, transform: Transform) *EntityBuilder {
-        self.world.transforms.set(self.entity, transform);
+        self.world.transforms.set(self.world.allocator, self.entity, transform) catch {};
         return self;
     }
 
     pub fn withSprite(self: *EntityBuilder, texture: rl.Texture) *EntityBuilder {
-        self.world.sprite_renderers.set(self.entity, SpriteRenderer.init(texture));
+        self.world.sprite_renderers.set(self.world.allocator, self.entity, SpriteRenderer.init(texture)) catch {};
         return self;
     }
 
     pub fn withCircle(self: *EntityBuilder, radius: f32, color: rl.Color) *EntityBuilder {
-        self.world.circle_renderers.set(self.entity, .{ .radius = radius, .color = color });
+        self.world.circle_renderers.set(self.world.allocator, self.entity, .{ .radius = radius, .color = color }) catch {};
         return self;
     }
 
     pub fn withRect(self: *EntityBuilder, width: f32, height: f32, color: rl.Color) *EntityBuilder {
-        self.world.rect_renderers.set(self.entity, .{ .width = width, .height = height, .color = color });
+        self.world.rect_renderers.set(self.world.allocator, self.entity, .{ .width = width, .height = height, .color = color }) catch {};
         return self;
     }
 
     pub fn withPlayerController(self: *EntityBuilder, speed: f32) *EntityBuilder {
-        self.world.player_controllers.set(self.entity, .{ .speed = speed });
+        self.world.player_controllers.set(self.world.allocator, self.entity, .{ .speed = speed }) catch {};
         return self;
     }
 
     pub fn withCamera(self: *EntityBuilder, offset: rl.Vector2, follow: Entity) *EntityBuilder {
-        self.world.cameras.set(self.entity, .{
+        self.world.cameras.set(self.world.allocator, self.entity, .{
             .offset = offset,
             .follow_target = follow,
-        });
+        }) catch {};
         return self;
     }
 
     pub fn withCameraFull(self: *EntityBuilder, cam: Camera) *EntityBuilder {
-        self.world.cameras.set(self.entity, cam);
+        self.world.cameras.set(self.world.allocator, self.entity, cam) catch {};
         return self;
     }
 
     pub fn withTrigger(self: *EntityBuilder, bounds: rl.Rectangle, action: TriggerAction, one_shot: bool) *EntityBuilder {
-        self.world.triggers.set(self.entity, .{
+        self.world.triggers.set(self.world.allocator, self.entity, .{
             .bounds = bounds,
             .action = action,
             .one_shot = one_shot,
-        });
+        }) catch {};
         return self;
     }
 
     pub fn withBoxCollider(self: *EntityBuilder, width: f32, height: f32) *EntityBuilder {
-        self.world.box_colliders.set(self.entity, .{ .width = width, .height = height });
+        self.world.box_colliders.set(self.world.allocator, self.entity, .{ .width = width, .height = height }) catch {};
         return self;
     }
 

@@ -1,5 +1,6 @@
 const rl = @import("raylib");
 const std = @import("std");
+const mem = @import("memory.zig");
 
 pub const ConditionFn = *const fn (ctx: ?*anyopaque) bool;
 pub const ActionFn = *const fn (ctx: ?*anyopaque) void;
@@ -151,6 +152,15 @@ pub const Runner = struct {
     pub const Event = enum { started, node_entered, typing_complete, choice_made, input_submitted, finished };
 
     pub fn init(allocator: std.mem.Allocator, script: *const Script) Runner {
+        return .{
+            .script = script,
+            .allocator = allocator,
+            .available = std.array_list.Managed(usize).init(allocator),
+        };
+    }
+
+    pub fn initForScene(script: *const Script) Runner {
+        const allocator = mem.scene();
         return .{
             .script = script,
             .allocator = allocator,

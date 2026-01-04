@@ -1,6 +1,7 @@
 const rl = @import("raylib");
 const std = @import("std");
 const builtin = @import("builtin");
+const mem = @import("engine/memory.zig");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
 const ecs = @import("engine/ecs.zig");
@@ -15,10 +16,8 @@ const GameState = struct {
     manager: scenes.SceneManager,
     gameDialogue: dialogue.Runner,
     playerTexture: rl.Texture2D,
-    allocator: std.mem.Allocator,
     sceneBuilder: scenes.Builder,
     script: dialogue.Script,
-    gpa: if (builtin.os.tag != .emscripten) std.heap.GeneralPurposeAllocator(.{}) else void,
 };
 
 var state: GameState = undefined;
@@ -31,18 +30,11 @@ fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toScen
 }
 
 fn init() !void {
+    mem.init();
+
     rl.initWindow(screenWidth, screenHeight, "Test Game");
 
     rl.setTargetFPS(60);
-
-    // Initialize allocator
-    if (builtin.os.tag == .emscripten) {
-        state.allocator = std.heap.c_allocator;
-        state.gpa = {};
-    } else {
-        state.gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        state.allocator = state.gpa.allocator();
-    }
 
     // Load assets
     const player_path = if (builtin.os.tag == .emscripten) "/assets/player.png" else "assets/player.png";
@@ -51,8 +43,8 @@ fn init() !void {
         return err;
     };
 
-    // Setup Dialogue
-    var builder = dialogue.Builder.init(state.allocator);
+    // Setup Dialogue using permanent allocator (dialogue script lives for engine lifetime)
+    var builder = dialogue.Builder.init(mem.permanent());
     defer builder.deinit();
 
     _ = builder.say("Narrator", "Hello!");
@@ -65,10 +57,10 @@ fn init() !void {
     _ = builder.done();
 
     state.script = try builder.build();
-    state.gameDialogue = dialogue.Runner.init(state.allocator, &state.script);
+    state.gameDialogue = dialogue.Runner.init(mem.scene(), &state.script);
 
-    state.manager = try scenes.SceneManager.initWithAllocator(&state.allocator, 10);
-    state.sceneBuilder = scenes.Builder.init(screenWidth, screenHeight);
+    state.manager = try scenes.SceneManager.initForEngine(10);
+    state.sceneBuilder = try scenes.Builder.init(mem.permanent(), screenWidth, screenHeight);
 
     state.manager.scenes[0] = state.sceneBuilder
         .onTransition(onSceneTransition)
@@ -100,13 +92,13 @@ fn deinit() void {
     rl.unloadTexture(state.playerTexture);
     rl.closeWindow();
 
-    if (builtin.os.tag != .emscripten) {
-        _ = state.gpa.deinit();
-    }
+    mem.deinit();
 }
 
 fn update() !void {
     if (!initialized) return;
+
+    mem.resetFrame();
 
     const deltaTime = rl.getFrameTime();
 
@@ -118,8 +110,10 @@ fn update() !void {
     if (rl.isKeyPressed(.r)) {
         const nextSceneIdx = state.manager.currentIndex + 1;
         if (nextSceneIdx < 10) {
-            state.manager.scenes[nextSceneIdx] = state.sceneBuilder
-                .reset(screenWidth, screenHeight)
+            mem.resetScene();
+
+            const builder = try state.sceneBuilder.reset(screenWidth, screenHeight);
+            state.manager.scenes[nextSceneIdx] = builder
                 .onTransition(onSceneTransition)
                 .build();
             state.manager.changeScene(nextSceneIdx) catch {};
