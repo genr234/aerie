@@ -5,6 +5,10 @@ const mem = @import("engine/memory.zig");
 const scenes = @import("engine/scenes.zig");
 const dialogue = @import("engine/dialogue.zig");
 const ecs = @import("engine/ecs.zig");
+const vn = @import("engine/vn.zig");
+const story = @import("engine/story.zig");
+const events = @import("engine/events.zig");
+const assets = @import("engine/utils/assets.zig");
 
 // Emscripten imports
 extern "c" fn emscripten_set_main_loop(func: *const fn () callconv(.c) void, fps: i32, simulate_infinite_loop: i32) void;
@@ -18,15 +22,24 @@ const GameState = struct {
     playerTexture: rl.Texture2D,
     sceneBuilder: scenes.Builder,
     script: dialogue.Script,
+    isTransitioning: bool = false,
+
+    vnActive: bool = false,
+    vnState: vn.VNState,
+    vnDialogue: dialogue.Runner,
+    vnScript: dialogue.Script,
+    storyState: story.StoryState,
+    eventQueue: events.EventQueue,
 };
 
 var state: GameState = undefined;
 var initialized: bool = false;
 
-fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) void {
+fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) bool {
     _ = scene;
     const tags = [_][]const u8{ "player", "origin_circle", "main_camera" };
     manager.transferPersistentEntities(manager.currentIndex, toSceneIndex, &tags);
+    return false;
 }
 
 fn init() !void {
@@ -37,7 +50,7 @@ fn init() !void {
     rl.setTargetFPS(60);
 
     // Load assets
-    const player_path = if (builtin.os.tag == .emscripten) "/assets/player.png" else "assets/player.png";
+    const player_path = try assets.parseAssetPath(mem.frame(), "player.png", builtin.os.tag);
     state.playerTexture = rl.loadTexture(player_path) catch |err| {
         std.debug.print("Failed to load texture: {s}\n", .{player_path});
         return err;
@@ -59,11 +72,43 @@ fn init() !void {
     state.script = try builder.build();
     state.gameDialogue = dialogue.Runner.init(mem.scene(), &state.script);
 
-    state.manager = try scenes.SceneManager.initForEngine(10);
+    state.eventQueue = events.EventQueue.init();
+    state.storyState = story.StoryState.initWithEvents(&state.eventQueue);
+
+    var vnBuilder = dialogue.Builder.init(mem.permanent());
+    defer vnBuilder.deinit();
+
+    _ = vnBuilder.say("???", "Vn mode");
+    _ = vnBuilder.ask("Narrator", "What will you do?", &[_]dialogue.Option{
+        .{ .text = "Continue", .goto = "continue" },
+        .{ .text = "Exit", .goto = "exit" },
+    });
+    _ = vnBuilder.label("continue");
+    _ = vnBuilder.say("Narrator", "You chose to continue.");
+    _ = vnBuilder.label("exit");
+    _ = vnBuilder.say("Narrator", "Goodbye for now.");
+    _ = vnBuilder.done();
+
+    state.vnScript = try vnBuilder.build();
+    state.vnDialogue = dialogue.Runner.init(mem.scene(), &state.vnScript);
+
+    // Initialize VN state and connect all references
+    state.vnState = vn.VNState.init(screenWidth, screenHeight);
+    state.vnState.setDialogueRunner(&state.vnDialogue);
+    state.vnState.setStoryState(&state.storyState);
+    state.vnState.setEventQueue(&state.eventQueue);
+
+    state.manager = try scenes.SceneManager.init(10);
+    state.manager.setOnTransition(onSceneTransition);
     state.sceneBuilder = try scenes.Builder.init(mem.permanent(), screenWidth, screenHeight);
 
+    // Bind all game systems to event queue for automatic event routing
+    state.eventQueue.bindSystems(.{
+        .sceneManager = &state.manager,
+        .storyState = &state.storyState,
+    });
+
     state.manager.scenes[0] = state.sceneBuilder
-        .onTransition(onSceneTransition)
         .camera("main_camera", .{
             .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
             .target = .{ .x = 0, .y = 0 },
@@ -89,6 +134,11 @@ fn deinit() void {
     state.manager.deinit();
     state.gameDialogue.deinit();
     state.script.deinit();
+
+    state.vnDialogue.deinit();
+    state.vnScript.deinit();
+    state.eventQueue.deinit();
+
     rl.unloadTexture(state.playerTexture);
     rl.closeWindow();
 
@@ -102,6 +152,21 @@ fn update() !void {
 
     const deltaTime = rl.getFrameTime();
 
+    if (rl.isKeyPressed(.v)) {
+        state.vnActive = !state.vnActive;
+        if (state.vnActive) {
+            state.vnDialogue.start(&state.storyState);
+        }
+    }
+
+    if (state.vnActive) {
+        state.vnState.handleInput();
+        state.vnState.update(deltaTime);
+
+        state.eventQueue.process(deltaTime);
+        return;
+    }
+
     state.manager.update(deltaTime);
     state.gameDialogue.update(deltaTime);
 
@@ -109,14 +174,12 @@ fn update() !void {
 
     if (rl.isKeyPressed(.r)) {
         const nextSceneIdx = state.manager.currentIndex + 1;
-        if (nextSceneIdx < 10) {
+        if (nextSceneIdx < 10 and !state.isTransitioning) {
+            state.isTransitioning = true;
             mem.resetScene();
 
-            const builder = try state.sceneBuilder.reset(screenWidth, screenHeight);
-            state.manager.scenes[nextSceneIdx] = builder
-                .onTransition(onSceneTransition)
-                .build();
             state.manager.changeScene(nextSceneIdx) catch {};
+            state.isTransitioning = false;
         }
     }
 
@@ -124,6 +187,8 @@ fn update() !void {
 
     const isPaused = state.gameDialogue.isActive() or state.manager.inputBlocked;
     currentScene.runSystems(deltaTime, isPaused);
+
+    state.eventQueue.process(deltaTime);
 }
 
 fn draw() void {
@@ -131,6 +196,12 @@ fn draw() void {
 
     rl.beginDrawing();
     rl.clearBackground(.white);
+
+    if (state.vnActive) {
+        state.vnState.draw();
+        defer rl.endDrawing();
+        return;
+    }
 
     const currentScene = state.manager.currentScene();
     const deltaTime = rl.getFrameTime();

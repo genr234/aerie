@@ -3,6 +3,7 @@ const rl = @import("raylib");
 const dialogue = @import("dialogue.zig");
 const sprites = @import("sprites.zig");
 const events = @import("events.zig");
+const root = @import("../root.zig");
 
 pub const Entity = struct {
     id: u32,
@@ -25,14 +26,21 @@ pub const TagComponent = struct {
 
     pub fn init(name: []const u8) TagComponent {
         var tag = TagComponent{};
-        const copy_len = @min(name.len, 64);
+        const max_copy: usize = tag.name.len - 1;
+        const copy_len: usize = @min(name.len, max_copy);
         @memcpy(tag.name[0..copy_len], name[0..copy_len]);
+        tag.name[copy_len] = 0;
         tag.len = copy_len;
         return tag;
     }
 
     pub fn get(self: *const TagComponent) []const u8 {
-        return self.name[0..self.len];
+        const max_len: usize = self.name.len;
+        var n: usize = self.len;
+        if (n > max_len) {
+            n = std.mem.indexOfScalar(u8, &self.name, 0) orelse max_len;
+        }
+        return self.name[0..n];
     }
 };
 
@@ -148,11 +156,11 @@ pub fn ComponentStorage(comptime T: type) type {
         const Self = @This();
 
         /// sparse maps entity_id -> dense index
-        sparse: std.ArrayListUnmanaged(?u32) = .{},
-        generations: std.ArrayListUnmanaged(u16) = .{},
+        sparse: std.array_list.Aligned(?u32, null) = .{},
+        generations: std.array_list.Aligned(u16, null) = .{},
 
-        dense_entities: std.ArrayListUnmanaged(u32) = .{},
-        dense_data: std.ArrayListUnmanaged(T) = .{},
+        dense_entities: std.array_list.Aligned(u32, null) = .{},
+        dense_data: std.array_list.Aligned(T, null) = .{},
 
         pub fn init(self: *Self, allocator: std.mem.Allocator, initial_capacity: usize) !void {
             try self.ensureEntityCapacity(allocator, initial_capacity);
@@ -270,10 +278,10 @@ pub const World = struct {
 
     allocator: std.mem.Allocator,
 
-    entity_generations: std.ArrayListUnmanaged(u16) = .{},
-    entity_alive: std.ArrayListUnmanaged(bool) = .{},
+    entity_generations: std.array_list.Aligned(u16, null) = .{},
+    entity_alive: std.array_list.Aligned(bool, null) = .{},
 
-    free_list: std.ArrayListUnmanaged(u32) = .{},
+    free_list: std.array_list.Aligned(u32, null) = .{},
     entity_count: u32 = 0,
 
     events: events.EventQueue,
@@ -370,22 +378,21 @@ pub const World = struct {
     }
 
     pub fn spawn(self: *Self) Entity {
-        var entity_id: u32 = undefined;
-
-        if (self.free_list.items.len > 0) {
-            entity_id = self.free_list.pop();
-        } else {
-            entity_id = @intCast(self.entity_alive.items.len);
-            // If we're at capacity, grow.
-            if (entity_id >= self.max_entities) {
-                self.ensureCapacity(@as(usize, entity_id) + 1) catch return Entity.INVALID;
+        const entity_id: u32 = if (self.free_list.items.len > 0) blk: {
+            // `pop()` returns an optional in Zig; unwrap is safe because len > 0.
+            break :blk (self.free_list.pop() orelse unreachable);
+        } else blk: {
+            const next_id: u32 = @intCast(self.entity_alive.items.len);
+            if (next_id >= self.max_entities) {
+                self.ensureCapacity(@as(usize, next_id) + 1) catch return Entity.INVALID;
             }
-        }
+            // After ensureCapacity, entity_alive has been resized to max_entities.
+            break :blk next_id;
+        };
 
-        if (entity_id >= self.entity_alive.items.len) {
-            // In practice entity_alive tracks max_entities; keep it consistent.
-            // But be defensive if old data structures assumed fixed.
-            _ = self.ensureCapacity(@as(usize, entity_id) + 1) catch return Entity.INVALID;
+        if (@as(usize, entity_id) >= self.entity_alive.items.len) {
+            // Defensive: keep arrays consistent even if invariants change.
+            self.ensureCapacity(@as(usize, entity_id) + 1) catch return Entity.INVALID;
         }
 
         self.entity_alive.items[entity_id] = true;
@@ -474,8 +481,8 @@ pub const World = struct {
 };
 
 pub const Systems = struct {
-    pub fn handleEvents(world: *World, dt: f32) void {
-        world.events.handleEvents(dt);
+    pub fn processEvents(world: *World, dt: f32) void {
+        world.events.process(dt);
     }
 
     pub fn playerMovement(world: *World, dt: f32) void {

@@ -1,6 +1,16 @@
 //! By convention, root.zig is the root source file when making a library.
 const std = @import("std");
 
+// modules
+pub const memory = @import("engine/memory.zig");
+pub const scenes = @import("engine/scenes.zig");
+pub const ecs = @import("engine/ecs.zig");
+pub const dialogue = @import("engine/dialogue.zig");
+pub const events = @import("engine/events.zig");
+pub const story = @import("engine/story.zig");
+pub const vn = @import("engine/vn.zig");
+pub const audio = @import("engine/audio.zig");
+
 pub fn bufferedPrint() !void {
     // Stdout is for the actual output of your application, for example if you
     // are implementing gzip, then only the compressed bytes should be sent to
@@ -14,10 +24,3 @@ pub fn bufferedPrint() !void {
     try stdout.flush(); // Don't forget to flush!
 }
 
-pub inline fn F32(int: anytype) f32 {
-    return @floatFromInt(int);
-}
-
-pub inline fn I32(float: anytype) i32 {
-    return @intFromFloat(float);
-}

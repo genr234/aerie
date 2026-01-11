@@ -1,9 +1,12 @@
 const std = @import("std");
 const rl = @import("raylib");
 const ecs = @import("ecs.zig");
+const vn = @import("vn.zig");
+const mem = @import("memory.zig");
 
 pub const SceneType = enum {
     exploration,
+    visual_novel,
 };
 
 const SceneTypeVTable = struct {
@@ -11,7 +14,7 @@ const SceneTypeVTable = struct {
     draw: ?*const fn (*Scene) void = null,
     onEnter: ?*const fn (*Scene) void = null,
     onExit: ?*const fn (*Scene) void = null,
-    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) bool = null,
 };
 
 fn explorationUpdate(scene: *Scene, dt: f32) void {
@@ -30,8 +33,44 @@ fn explorationOnExit(scene: *Scene) void {
     if (scene.onExit) |f| f(scene);
 }
 
-fn explorationOnTransition(scene: *Scene, mgr: *SceneManager, dst_index: usize) void {
-    if (scene.onTransition) |f| f(scene, mgr, dst_index);
+fn explorationOnTransition(scene: *Scene, mgr: *SceneManager, dst_index: usize) bool {
+    if (scene.onTransition) |f| {
+        return f(scene, mgr, dst_index);
+    }
+    return true;
+}
+
+// VN mode vtable functions
+fn vnUpdate(scene: *Scene, dt: f32) void {
+    if (scene.vnState) |*state| {
+        state.update(dt);
+    }
+    if (scene.update) |u| u(scene, dt);
+}
+
+fn vnDraw(scene: *Scene) void {
+    if (scene.vnState) |*state| {
+        state.draw();
+    }
+    if (scene.draw) |d| d(scene);
+}
+
+fn vnOnEnter(scene: *Scene) void {
+    if (scene.vnState) |*state| {
+        state.fadeIn(0.5);
+    }
+    if (scene.onEnter) |f| f(scene);
+}
+
+fn vnOnExit(scene: *Scene) void {
+    if (scene.onExit) |f| f(scene);
+}
+
+fn vnOnTransition(scene: *Scene, mgr: *SceneManager, dst_index: usize) bool {
+    if (scene.onTransition) |f| {
+        return f(scene, mgr, dst_index);
+    }
+    return true;
 }
 
 fn vtableFor(scene_type: SceneType) SceneTypeVTable {
@@ -42,6 +81,13 @@ fn vtableFor(scene_type: SceneType) SceneTypeVTable {
             .onEnter = explorationOnEnter,
             .onExit = explorationOnExit,
             .onTransition = explorationOnTransition,
+        },
+        .visual_novel => .{
+            .update = vnUpdate,
+            .draw = vnDraw,
+            .onEnter = vnOnEnter,
+            .onExit = vnOnExit,
+            .onTransition = vnOnTransition,
         },
     };
 }
@@ -56,7 +102,7 @@ pub const SceneConfig = struct {
     draw: ?*const fn (*Scene) void = null,
     onEnter: ?*const fn (*Scene) void = null,
     onExit: ?*const fn (*Scene) void = null,
-    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) bool = null,
     setup: ?*const fn (*Scene, *anyopaque) void = null,
 };
 
@@ -70,24 +116,62 @@ pub const Scene = struct {
     draw: ?*const fn (*Scene) void = null,
     onEnter: ?*const fn (*Scene) void = null,
     onExit: ?*const fn (*Scene) void = null,
-    onTransition: ?*const fn (*Scene, *SceneManager, usize) void = null,
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) bool = null,
 
     message: ?[:0]const u8 = null,
     messageTimer: f32 = 0.0,
 
-    world: ecs.World = ecs.World.init(),
+    world: ecs.World = undefined,
+    world_initialized: bool = false,
+
+    // VN mode state
+    vnState: ?vn.VNState = null,
 
     const Self = @This();
 
-    pub fn init(width: i32, height: i32) Scene {
+    /// Initialize scene with explicit allocator
+    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32) !Scene {
         var scene = Scene{
             .width = width,
             .height = height,
             .scene_type = .exploration,
+            .world = try ecs.World.init(allocator, 1024),
+            .world_initialized = true,
         };
         scene.world.bounds_width = @floatFromInt(width);
         scene.world.bounds_height = @floatFromInt(height);
         return scene;
+    }
+
+    /// Initialize using the scene arena allocator
+    pub fn initForScene(width: i32, height: i32) !Scene {
+        return Scene.init(mem.scene(), width, height);
+    }
+
+    /// Initialize VN scene with explicit allocator
+    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32) !Scene {
+        const scene = Scene{
+            .width = width,
+            .height = height,
+            .scene_type = .visual_novel,
+            .vnState = vn.VNState.init(width, height),
+            .world = try ecs.World.init(allocator, ecs.MAX_ENTITIES),
+            .world_initialized = true,
+        };
+        return scene;
+    }
+
+    /// Initialize VN scene using the scene arena allocator
+    pub fn initVNForScene(width: i32, height: i32) !Scene {
+        return Scene.initVN(mem.scene(), width, height);
+    }
+
+    /// Deinit - optional when using arena allocation
+    pub fn deinit(self: *Self) void {
+        if (self.world_initialized) {
+            self.world.deinit();
+            self.world_initialized = false;
+        }
     }
 
     fn vtable(self: *Self) SceneTypeVTable {
@@ -114,9 +198,10 @@ pub const Scene = struct {
         if (vt.onExit) |f| f(self);
     }
 
-    pub fn dispatchOnTransition(self: *Self, mgr: *SceneManager, dst_index: usize) void {
+    pub fn dispatchOnTransition(self: *Self, mgr: *SceneManager, dst_index: usize) bool {
         const vt = self.vtable();
-        if (vt.onTransition) |f| f(self, mgr, dst_index);
+        if (vt.onTransition) |f| return f(self, mgr, dst_index);
+        return true;
     }
 
     pub fn spawn(self: *Self) ecs.Entity {
@@ -136,7 +221,7 @@ pub const Scene = struct {
         ecs.Systems.playerMovement(&self.world, dt);
         ecs.Systems.cameraFollow(&self.world);
         ecs.Systems.triggerCheck(&self.world);
-        ecs.Systems.handleEvents(&self.world, dt);
+        ecs.Systems.processEvents(&self.world, dt);
     }
 
     pub fn drawWorld(self: *Self) void {
@@ -154,28 +239,86 @@ pub const Scene = struct {
     pub fn getPlayerRect(self: *Self) ?rl.Rectangle {
         return ecs.Systems.getPlayerRect(&self.world);
     }
+
+    pub fn getVNState(self: *Self) ?*vn.VNState {
+        if (self.vnState) |*state| {
+            return state;
+        }
+        return null;
+    }
+
+    pub fn handleVNInput(self: *Self) void {
+        if (self.vnState) |*state| {
+            state.handleInput();
+        }
+    }
+
+    pub fn isVNDialogueActive(self: *const Self) bool {
+        if (self.vnState) |*state| {
+            return state.isDialogueActive();
+        }
+        return false;
+    }
 };
 
 pub const Builder = struct {
     scene: Scene,
+    allocator: std.mem.Allocator,
 
-    pub fn init(width: i32, height: i32) Builder {
-        return .{ .scene = Scene.init(width, height) };
+    /// Initialize with explicit allocator
+    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32) !Builder {
+        return .{
+            .scene = try Scene.init(allocator, width, height),
+            .allocator = allocator,
+        };
     }
 
-    pub fn reset(self: *Builder, width: i32, height: i32) *Builder {
-        self.scene = Scene.init(width, height);
+    /// Initialize using scene arena allocator
+    pub fn initForScene(width: i32, height: i32) !Builder {
+        return Builder.init(mem.scene(), width, height);
+    }
+
+    /// Initialize VN scene with explicit allocator
+    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32) !Builder {
+        return .{
+            .scene = try Scene.initVN(allocator, width, height),
+            .allocator = allocator,
+        };
+    }
+
+    /// Initialize VN scene using scene arena allocator
+    pub fn initVNForScene(width: i32, height: i32) !Builder {
+        return Builder.initVN(mem.scene(), width, height);
+    }
+
+    pub fn reset(self: *Builder, width: i32, height: i32) !*Builder {
+        if (self.scene.world_initialized) {
+            self.scene.deinit();
+        }
+        self.scene = try Scene.init(self.allocator, width, height);
         return self;
     }
 
-    pub fn buildAndReset(self: *Builder, width: i32, height: i32) Scene {
+    pub fn resetVN(self: *Builder, width: i32, height: i32) !*Builder {
+        if (self.scene.world_initialized) {
+            self.scene.deinit();
+        }
+        self.scene = try Scene.initVN(self.allocator, width, height);
+        return self;
+    }
+
+    pub fn buildAndReset(self: *Builder, width: i32, height: i32) !Scene {
         const out = self.scene;
-        self.scene = Scene.init(width, height);
+        self.scene = try Scene.init(self.allocator, width, height);
         return out;
     }
 
     pub fn sceneType(self: *Builder, t: SceneType) *Builder {
         self.scene.scene_type = t;
+        // Initialize VN state if switching to VN mode
+        if (t == .visual_novel and self.scene.vnState == null) {
+            self.scene.vnState = vn.VNState.init(self.scene.width, self.scene.height);
+        }
         return self;
     }
 
@@ -249,7 +392,7 @@ pub const Builder = struct {
         return self;
     }
 
-    pub fn onTransition(self: *Builder, func: *const fn (*Scene, *SceneManager, usize) void) *Builder {
+    pub fn onTransition(self: *Builder, func: *const fn (*Scene, *SceneManager, usize) bool) *Builder {
         self.scene.onTransition = func;
         return self;
     }
@@ -291,29 +434,27 @@ pub const SceneManager = struct {
     objectsToCleanup: [64][]const u8 = undefined,
     cleanupCount: usize = 0,
 
-    pub fn initStatic(scenes_ptr: []Scene) SceneManager {
-        return .{
-            .scenes = scenes_ptr,
-            .capacity = scenes_ptr.len,
-            .history = &.{},
-            .objectsToCleanup = undefined,
-        };
-    }
+    /// Global transition callback invoked on any scene transition.
+    /// Called before the source scene's own `Scene.onTransition` (if any).
+    onTransition: ?*const fn (*Scene, *SceneManager, usize) bool = null,
 
-    pub fn initWithAllocator(allocator: *std.mem.Allocator, capacity: usize) !SceneManager {
+    /// Initialize using the permanent arena for scene manager data
+    pub fn init(capacity: usize) !SceneManager {
+        const allocator = mem.permanent();
         const scenes_ptr = try allocator.alloc(Scene, capacity);
         for (scenes_ptr) |*s| {
-            s.* = Scene.init(800, 450);
+            s.* = try Scene.init(allocator, 800, 450);
         }
         const history_ptr = try allocator.alloc(usize, capacity);
         @memset(history_ptr, 0);
 
         return .{
             .scenes = scenes_ptr,
-            .allocator = allocator,
+            .allocator = null,
             .capacity = capacity,
             .history = history_ptr,
             .objectsToCleanup = undefined,
+            .onTransition = null,
         };
     }
 
@@ -332,6 +473,10 @@ pub const SceneManager = struct {
         return &self.scenes[self.currentIndex];
     }
 
+    pub fn setOnTransition(self: *SceneManager, func: ?*const fn (*Scene, *SceneManager, usize) bool) void {
+        self.onTransition = func;
+    }
+
     fn startTransition(self: *SceneManager, index: usize) void {
         if (index >= self.scenes.len) return;
         if (self.transitionState != .None) return;
@@ -344,7 +489,13 @@ pub const SceneManager = struct {
         };
         self.zoomStart = cc.zoom;
 
-        cs.dispatchOnTransition(self, index);
+        // Check scene-specific callback - if it returns false, block transition entirely
+        if (!cs.dispatchOnTransition(self, index)) return;
+
+        // Global callback - if it returns false, skip it but continue transition
+        if (self.onTransition) |f| {
+            _ = f(cs, self, index);
+        }
 
         self.zoomTarget = 1.5;
         self.transitionNextIndex = index;
@@ -358,6 +509,29 @@ pub const SceneManager = struct {
         if (self.transitionState != .None) return;
         self.lastIndex = self.currentIndex;
         self.startTransition(index);
+    }
+
+    /// Change scene by looking up a scene with a matching tag.
+    /// Searches for an entity with the given tag in each scene's world.
+    pub fn changeSceneByName(self: *SceneManager, name: []const u8) !void {
+        for (self.scenes[0..self.capacity], 0..) |*scene, i| {
+            // Look for a scene marker entity with this name as tag
+            if (scene.world.findByTag(name) != null) {
+                try self.changeScene(i);
+                return;
+            }
+        }
+        // Scene not found - could log or return error
+    }
+
+    /// Find scene index by name (tag lookup)
+    pub fn findSceneByName(self: *SceneManager, name: []const u8) ?usize {
+        for (self.scenes[0..self.capacity], 0..) |*scene, i| {
+            if (scene.world.findByTag(name) != null) {
+                return i;
+            }
+        }
+        return null;
     }
 
     pub fn transferPersistentEntities(self: *SceneManager, from: usize, to: usize, tags: []const []const u8) void {
@@ -391,6 +565,12 @@ pub const SceneManager = struct {
         }
     }
 
+    fn copyIfPresent(allocator: std.mem.Allocator, src_store: anytype, dst_store: anytype, src: ecs.Entity, dst: ecs.Entity) void {
+        if (src_store.get(src)) |c| {
+            dst_store.set(allocator, dst, c.*) catch {};
+        }
+    }
+
     fn transferSingleEntity(self: *SceneManager, src_world: *ecs.World, dst_world: *ecs.World, tag: []const u8) void {
         _ = self;
 
@@ -402,25 +582,24 @@ pub const SceneManager = struct {
 
         const dst_entity = dst_world.spawn();
 
-        if (src_world.tags.get(src_entity)) |t| dst_world.tags.set(dst_entity, t.*);
-        if (src_world.transforms.get(src_entity)) |t| dst_world.transforms.set(dst_entity, t.*);
-        if (src_world.sprite_renderers.get(src_entity)) |t| dst_world.sprite_renderers.set(dst_entity, t.*);
-        if (src_world.circle_renderers.get(src_entity)) |t| dst_world.circle_renderers.set(dst_entity, t.*);
-        if (src_world.rect_renderers.get(src_entity)) |t| dst_world.rect_renderers.set(dst_entity, t.*);
-        if (src_world.player_controllers.get(src_entity)) |t| dst_world.player_controllers.set(dst_entity, t.*);
-        if (src_world.box_colliders.get(src_entity)) |t| dst_world.box_colliders.set(dst_entity, t.*);
-        if (src_world.actives.get(src_entity)) |t| dst_world.actives.set(dst_entity, t.*);
+        // Use the destination world's allocator (scene lifetime) to avoid mixing lifetimes.
+        const alloc = dst_world.allocator;
+        copyIfPresent(alloc, &src_world.tags, &dst_world.tags, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.transforms, &dst_world.transforms, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.sprite_renderers, &dst_world.sprite_renderers, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.circle_renderers, &dst_world.circle_renderers, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.rect_renderers, &dst_world.rect_renderers, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.player_controllers, &dst_world.player_controllers, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.box_colliders, &dst_world.box_colliders, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.actives, &dst_world.actives, src_entity, dst_entity);
+        copyIfPresent(alloc, &src_world.triggers, &dst_world.triggers, src_entity, dst_entity);
 
         if (src_world.cameras.get(src_entity)) |cam| {
             var new_cam = cam.*;
             if (cam.follow_target.isValid()) {
                 new_cam.follow_target = ecs.Entity.INVALID;
             }
-            dst_world.cameras.set(dst_entity, new_cam);
-        }
-
-        if (src_world.triggers.get(src_entity)) |trig| {
-            dst_world.triggers.set(dst_entity, trig.*);
+            dst_world.cameras.set(alloc, dst_entity, new_cam) catch {};
         }
     }
 

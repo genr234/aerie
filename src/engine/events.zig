@@ -1,6 +1,9 @@
 const std = @import("std");
 const rl = @import("raylib");
 const dialogue = @import("dialogue.zig");
+const scenes = @import("scenes.zig");
+const story = @import("story.zig");
+const audio = @import("audio.zig");
 
 pub const MAX_MESSAGE_LEN = 256;
 pub const MAX_ID_LEN = 64;
@@ -159,117 +162,111 @@ pub fn customEvent(id: u32, data: ?*anyopaque) Event {
     return .{ .Custom = .{ .id = id, .data = data } };
 }
 
-// ============================================================================
-// Event Queue
-// ============================================================================
 
-/// Handler function type for external event processing.
-/// Return true if the event was consumed and should be removed, false to keep it.
-pub const EventHandler = *const fn (event: *Event, ctx: ?*anyopaque) bool;
+/// Callback for custom event handling (return true if consumed)
+pub const CustomEventHandler = *const fn (id: u32, data: ?*anyopaque) bool;
 
-/// Entry for storing handler with context
-pub const HandlerEntry = struct {
-    handler: EventHandler,
-    ctx: ?*anyopaque,
+/// Game systems binding for automatic event routing
+pub const GameSystems = struct {
+    sceneManager: ?*scenes.SceneManager = null,
+    storyState: ?*story.StoryState = null,
+    audioManager: ?*audio.AudioManager = null,
+    customHandler: ?CustomEventHandler = null,
+    onQuit: ?*const fn () void = null,
 };
 
 pub const EventQueue = struct {
     events: [128]Event = undefined,
-    capacity: usize = 128,
     count: usize = 0,
 
-    /// External handlers for events that need special processing (e.g., SceneManager for ChangeScene)
-    handlers: [8]?HandlerEntry = [_]?HandlerEntry{null} ** 8,
-    handlerCount: usize = 0,
+    systems: GameSystems = .{},
 
-    pub fn init() EventQueue {
-        return EventQueue{ .events = undefined, .capacity = 128, .count = 0 };
+    const Self = @This();
+    const CAPACITY: usize = 128;
+
+    /// Initialize an empty event queue
+    pub fn init() Self {
+        return .{};
     }
 
-    pub fn deinit(self: *EventQueue) void {
+    /// Initialize with game systems already bound
+    pub fn initWithSystems(sys: GameSystems) Self {
+        return .{ .systems = sys };
+    }
+
+    pub fn deinit(self: *Self) void {
         self.count = 0;
-        self.handlerCount = 0;
+        self.systems = .{};
     }
 
-    /// Register an event handler that will be called for each event during processing
-    pub fn addHandler(self: *EventQueue, handler: EventHandler, ctx: ?*anyopaque) void {
-        if (self.handlerCount < self.handlers.len) {
-            self.handlers[self.handlerCount] = .{ .handler = handler, .ctx = ctx };
-            self.handlerCount += 1;
-        }
+    /// Bind game systems for automatic event routing.
+    /// This replaces the need for manual event handlers.
+    pub fn bindSystems(self: *Self, sys: GameSystems) void {
+        self.systems = sys;
     }
 
-    /// Remove an event handler
-    pub fn removeHandler(self: *EventQueue, handler: EventHandler) void {
-        var i: usize = 0;
-        while (i < self.handlerCount) {
-            if (self.handlers[i]) |h| {
-                if (h.handler == handler) {
-                    // Shift remaining handlers
-                    var j = i;
-                    while (j + 1 < self.handlerCount) : (j += 1) {
-                        self.handlers[j] = self.handlers[j + 1];
-                    }
-                    self.handlers[self.handlerCount - 1] = null;
-                    self.handlerCount -= 1;
-                    continue;
-                }
-            }
-            i += 1;
-        }
+    /// Bind individual systems (convenience methods)
+    pub fn bindSceneManager(self: *Self, mgr: *scenes.SceneManager) void {
+        self.systems.sceneManager = mgr;
     }
 
-    pub fn push(self: *EventQueue, event: Event) !void {
-        if (self.count >= self.capacity) {
+    pub fn bindStoryState(self: *Self, state: *story.StoryState) void {
+        self.systems.storyState = state;
+    }
+
+    pub fn bindAudioManager(self: *Self, mgr: *audio.AudioManager) void {
+        self.systems.audioManager = mgr;
+    }
+
+    pub fn setCustomHandler(self: *Self, handler: CustomEventHandler) void {
+        self.systems.customHandler = handler;
+    }
+
+    pub fn setOnQuit(self: *Self, handler: *const fn () void) void {
+        self.systems.onQuit = handler;
+    }
+
+
+    pub fn push(self: *Self, event: Event) !void {
+        if (self.count >= CAPACITY) {
             return error.QueueFull;
         }
         self.events[self.count] = event;
         self.count += 1;
     }
 
-    pub fn pop(self: *EventQueue) ?Event {
-        if (self.count == 0) {
-            return null;
-        }
+    pub fn pop(self: *Self) ?Event {
+        if (self.count == 0) return null;
         self.count -= 1;
         return self.events[self.count];
     }
 
-    pub fn peek(self: *const EventQueue, index: usize) ?*const Event {
+    pub fn peek(self: *const Self, index: usize) ?*const Event {
         if (index >= self.count) return null;
         return &self.events[index];
     }
 
-    pub fn isEmpty(self: *const EventQueue) bool {
+    pub fn isEmpty(self: *const Self) bool {
         return self.count == 0;
     }
 
-    pub fn clear(self: *EventQueue) void {
+    pub fn clear(self: *Self) void {
         self.count = 0;
     }
 
-    /// Process all events. Some events like ShowMessage persist until their duration expires.
-    pub fn handleEvents(self: *EventQueue, dt: f32) void {
+    pub fn len(self: *const Self) usize {
+        return self.count;
+    }
+
+    /// Process all pending events, routing them to bound systems.
+    /// Events like ShowMessage persist until their duration expires.
+    pub fn process(self: *Self, dt: f32) void {
         var i: usize = 0;
         while (i < self.count) {
-            var consumed = false;
-
-            for (self.handlers[0..self.handlerCount]) |maybeHandler| {
-                if (maybeHandler) |h| {
-                    if (h.handler(&self.events[i], h.ctx)) {
-                        consumed = true;
-                        break;
-                    }
-                }
-            }
-
-            // If not consumed by external handler, handle built-in events
-            if (!consumed) {
-                consumed = self.handleBuiltinEvent(&self.events[i], dt);
-            }
+            const consumed = self.dispatchEvent(&self.events[i], dt);
 
             if (consumed) {
-                // Remove the event by swapping with last
+                // Remove by swapping with last
                 if (i < self.count - 1) {
                     self.events[i] = self.events[self.count - 1];
                 }
@@ -280,23 +277,21 @@ pub const EventQueue = struct {
         }
     }
 
-    fn handleBuiltinEvent(self: *EventQueue, event: *Event, dt: f32) bool {
-        _ = self;
+    /// Dispatch a single event to the appropriate system
+    fn dispatchEvent(self: *Self, event: *Event, dt: f32) bool {
         switch (event.*) {
             .ShowMessage => |*msg| {
                 msg.elapsed += dt;
                 if (msg.elapsed < msg.duration) {
                     const text = msg.getText();
-                    rl.drawText(text, 10, 10, 20, .red);
-                    return false; // Keep the event
-                } else {
-                    return true; // Remove the event
+                    rl.drawText(text, 10, 10, 20, rl.Color.red);
+                    return false; // Keep until duration expires
                 }
+                return true;
             },
+
             .StartDialogue => |*dlg| {
-                // Start the dialogue runner
                 if (dlg.getLabel()) |label| {
-                    // Jump to label then start
                     if (dlg.runner.script.findLabel(label)) |idx| {
                         dlg.runner.index = idx;
                     }
@@ -304,14 +299,88 @@ pub const EventQueue = struct {
                 dlg.runner.start(dlg.context);
                 return true;
             },
-            // Events that need external handling (SceneManager, StoryState, etc.)
-            .ChangeScene, .SetFlag, .PlaySound, .SetEntityActive, .PauseGame, .QuitGame, .Custom => {
+
+            .ChangeScene => |cs| {
+                if (self.systems.sceneManager) |mgr| {
+                    if (cs.useIndex) {
+                        mgr.changeScene(cs.sceneIndex) catch {};
+                    } else if (cs.getSceneName()) |name| {
+                        mgr.changeSceneByName(name) catch {};
+                    }
+                }
+                return true;
+            },
+
+            .SetFlag => |sf| {
+                if (self.systems.storyState) |state| {
+                    state.setFlag(sf.getFlagName(), sf.value);
+                }
+                return true;
+            },
+
+            .PlaySound => |ps| {
+                if (self.systems.audioManager) |mgr| {
+                    if (ps.loop) {
+                        mgr.playSoundLooped(ps.getSoundId(), ps.volume);
+                    } else {
+                        mgr.playSound(ps.getSoundId(), ps.volume);
+                    }
+                }
+                return true;
+            },
+
+            .SetEntityActive => |sea| {
+                if (self.systems.sceneManager) |mgr| {
+                    const scene = mgr.currentScene();
+                    if (scene.world.findByTag(sea.getEntityTag())) |entity| {
+                        scene.world.setActive(entity, sea.active);
+                    }
+                }
+                return true;
+            },
+
+            .PauseGame => |pg| {
+                if (self.systems.sceneManager) |mgr| {
+                    mgr.inputBlocked = pg.paused;
+                }
+                return true;
+            },
+
+            .QuitGame => {
+                if (self.systems.onQuit) |handler| {
+                    handler();
+                } else {
+                    rl.closeWindow();
+                }
+                return true;
+            },
+
+            .Custom => |c| {
+                if (self.systems.customHandler) |handler| {
+                    return handler(c.id, c.data);
+                }
                 return true;
             },
         }
     }
 
-    pub fn iterator(self: *EventQueue) Iterator {
+    pub fn hasEventOfType(self: *const Self, comptime event_type: std.meta.Tag(Event)) bool {
+        for (self.events[0..self.count]) |evt| {
+            if (std.meta.activeTag(evt) == event_type) return true;
+        }
+        return false;
+    }
+
+    pub fn countEventsOfType(self: *const Self, comptime event_type: std.meta.Tag(Event)) usize {
+        var c: usize = 0;
+        for (self.events[0..self.count]) |evt| {
+            if (std.meta.activeTag(evt) == event_type) c += 1;
+        }
+        return c;
+    }
+
+    /// Iterator for read-only access to pending events
+    pub fn iterator(self: *Self) Iterator {
         return .{ .queue = self, .index = 0 };
     }
 
@@ -326,23 +395,4 @@ pub const EventQueue = struct {
             return event;
         }
     };
-
-    pub fn hasEventOfType(self: *const EventQueue, comptime event_type: std.meta.Tag(Event)) bool {
-        for (self.events[0..self.count]) |evt| {
-            if (std.meta.activeTag(evt) == event_type) return true;
-        }
-        return false;
-    }
-
-    pub fn countEventsOfType(self: *const EventQueue, comptime event_type: std.meta.Tag(Event)) usize {
-        var count: usize = 0;
-        for (self.events[0..self.count]) |evt| {
-            if (std.meta.activeTag(evt) == event_type) count += 1;
-        }
-        return count;
-    }
-
-    pub fn len(self: *const EventQueue) usize {
-        return self.count;
-    }
 };
