@@ -85,8 +85,7 @@ pub const Event = union(enum) {
     PauseGame: struct { paused: bool = true },
     QuitGame: void,
     Custom: struct {
-        id: u32,
-        data: ?*anyopaque = null,
+        action: *const void,
     },
 };
 
@@ -105,6 +104,7 @@ pub fn startDialogue(runner: *dialogue.Runner, context: ?*anyopaque) Event {
         .context = context,
     } };
 }
+
 
 pub fn startDialogueAt(runner: *dialogue.Runner, context: ?*anyopaque, label: []const u8) Event {
     const len = @min(label.len, MAX_ID_LEN - 1);
@@ -158,13 +158,13 @@ pub fn quitGame() Event {
     return .{ .QuitGame = {} };
 }
 
-pub fn customEvent(id: u32, data: ?*anyopaque) Event {
-    return .{ .Custom = .{ .id = id, .data = data } };
+pub fn customEvent(action: void) Event {
+    return .{ .Custom = .{ .action = &action } };
 }
 
 
 /// Callback for custom event handling (return true if consumed)
-pub const CustomEventHandler = *const fn (id: u32, data: ?*anyopaque) bool;
+pub const CustomEventHandler = *const fn (action: *const void) bool;
 
 /// Game systems binding for automatic event routing
 pub const GameSystems = struct {
@@ -282,12 +282,7 @@ pub const EventQueue = struct {
         switch (event.*) {
             .ShowMessage => |*msg| {
                 msg.elapsed += dt;
-                if (msg.elapsed < msg.duration) {
-                    const text = msg.getText();
-                    rl.drawText(text, 10, 10, 20, rl.Color.red);
-                    return false; // Keep until duration expires
-                }
-                return true;
+                return msg.elapsed >= msg.duration;
             },
 
             .StartDialogue => |*dlg| {
@@ -357,10 +352,23 @@ pub const EventQueue = struct {
 
             .Custom => |c| {
                 if (self.systems.customHandler) |handler| {
-                    return handler(c.id, c.data);
+                    return handler(c.action);
                 }
                 return true;
             },
+        }
+    }
+
+    pub fn forEachActiveMessage(self: *const Self, func: anytype) void {
+        for (self.events[0..self.count]) |*evt| {
+            switch (evt.*) {
+                .ShowMessage => |msg| {
+                    if (msg.elapsed < msg.duration) {
+                        func(&msg);
+                    }
+                },
+                else => {},
+            }
         }
     }
 

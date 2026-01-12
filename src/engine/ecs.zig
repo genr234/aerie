@@ -119,6 +119,10 @@ pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque) Trig
     };
 }
 
+pub fn TriggerRunAction(action: dialogue.ActionFn) TriggerAction {
+    return TriggerAction{ .run_action = action };
+}
+
 pub const Trigger = struct {
     bounds: rl.Rectangle,
     action: TriggerAction,
@@ -621,10 +625,10 @@ pub const Systems = struct {
                         world.events.push(events.showMessage(buf[0..len], 2.0)) catch {};
                     },
                     .start_dialogue => |payload| {
-                        payload.runner.start(payload.context);
+                        world.events.push(events.startDialogue(payload.runner, payload.context)) catch {};
                     },
                     .run_action => |action| {
-                        action(null);
+                        world.events.push(events.customEvent(action(world))) catch {};
                     },
                 }
                 if (trigger.one_shot) trigger.triggered = true;

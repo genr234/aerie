@@ -9,6 +9,7 @@ const vn = @import("engine/vn.zig");
 const story = @import("engine/story.zig");
 const events = @import("engine/events.zig");
 const assets = @import("engine/utils/assets.zig");
+const ui = @import("engine/ui.zig");
 
 // Emscripten imports
 extern "c" fn emscripten_set_main_loop(func: *const fn () callconv(.c) void, fps: i32, simulate_infinite_loop: i32) void;
@@ -120,7 +121,7 @@ fn init() !void {
             .speed = 100,
             .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
         })
-        .circle("origin_circle", .{ .x = 15, .y = 15 }, 4, rl.Color.blue)
+        .circle("origin_circle", .{ .x = 0, .y = 0 }, 4, rl.Color.blue)
         .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
         .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, ecs.TriggerDialogueStart(&state.gameDialogue, null), false)
         .build();
@@ -228,6 +229,16 @@ fn draw() void {
     dialogue.draw(&state.gameDialogue, dialogueBounds, .{});
 
     rl.drawText(rl.textFormat("Scene: %d", .{state.manager.currentIndex}), 10, 10, 20, .green);
+
+    ui.drawFromEventQueue(state.eventQueue, .{
+        .toast = .{
+            .origin = .{ .x = 10, .y = 40 },
+            .lineHeight = 24,
+            .fontSize = 20,
+            .color = .black,
+            .maxLines = 4,
+        }
+    });
 
     state.manager.draw();
 
