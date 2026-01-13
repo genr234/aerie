@@ -3,6 +3,7 @@ const rl = @import("raylib");
 const ecs = @import("ecs.zig");
 const vn = @import("vn.zig");
 const mem = @import("memory.zig");
+const state = @import("state.zig");
 
 pub const SceneType = enum {
     exploration,
@@ -42,22 +43,22 @@ fn explorationOnTransition(scene: *Scene, mgr: *SceneManager, dst_index: usize) 
 
 // VN mode vtable functions
 fn vnUpdate(scene: *Scene, dt: f32) void {
-    if (scene.vnState) |*state| {
-        state.update(dt);
+    if (scene.vnState) |*s| {
+        s.update(dt);
     }
     if (scene.update) |u| u(scene, dt);
 }
 
 fn vnDraw(scene: *Scene) void {
-    if (scene.vnState) |*state| {
-        state.draw();
+    if (scene.vnState) |*s| {
+        s.draw();
     }
     if (scene.draw) |d| d(scene);
 }
 
 fn vnOnEnter(scene: *Scene) void {
-    if (scene.vnState) |*state| {
-        state.fadeIn(0.5);
+    if (scene.vnState) |*s| {
+        s.fadeIn(0.5);
     }
     if (scene.onEnter) |f| f(scene);
 }
@@ -130,12 +131,12 @@ pub const Scene = struct {
     const Self = @This();
 
     /// Initialize scene with explicit allocator
-    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32) !Scene {
+    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32, game_state: *state.GameState) !Scene {
         var scene = Scene{
             .width = width,
             .height = height,
             .scene_type = .exploration,
-            .world = try ecs.World.init(allocator, 1024),
+            .world = try ecs.World.init(allocator, 1024, game_state),
             .world_initialized = true,
         };
         scene.world.bounds_width = @floatFromInt(width);
@@ -144,26 +145,26 @@ pub const Scene = struct {
     }
 
     /// Initialize using the scene arena allocator
-    pub fn initForScene(width: i32, height: i32) !Scene {
-        return Scene.init(mem.scene(), width, height);
+    pub fn initForScene(width: i32, height: i32, game_state: *state.GameState) !Scene {
+        return Scene.init(mem.scene(), width, height, game_state);
     }
 
     /// Initialize VN scene with explicit allocator
-    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32) !Scene {
+    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32, game_state: *state.GameState) !Scene {
         const scene = Scene{
             .width = width,
             .height = height,
             .scene_type = .visual_novel,
             .vnState = vn.VNState.init(width, height),
-            .world = try ecs.World.init(allocator, ecs.MAX_ENTITIES),
+            .world = try ecs.World.init(allocator, ecs.MAX_ENTITIES, game_state),
             .world_initialized = true,
         };
         return scene;
     }
 
     /// Initialize VN scene using the scene arena allocator
-    pub fn initVNForScene(width: i32, height: i32) !Scene {
-        return Scene.initVN(mem.scene(), width, height);
+    pub fn initVNForScene(width: i32, height: i32, game_state: *state.GameState) !Scene {
+        return Scene.initVN(mem.scene(), width, height, game_state);
     }
 
     /// Deinit - optional when using arena allocation
@@ -241,21 +242,21 @@ pub const Scene = struct {
     }
 
     pub fn getVNState(self: *Self) ?*vn.VNState {
-        if (self.vnState) |*state| {
-            return state;
+        if (self.vnState) |*s| {
+            return s;
         }
         return null;
     }
 
     pub fn handleVNInput(self: *Self) void {
-        if (self.vnState) |*state| {
-            state.handleInput();
+        if (self.vnState) |*s| {
+            s.handleInput();
         }
     }
 
     pub fn isVNDialogueActive(self: *const Self) bool {
-        if (self.vnState) |*state| {
-            return state.isDialogueActive();
+        if (self.vnState) |*s| {
+            return s.isDialogueActive();
         }
         return false;
     }
@@ -266,50 +267,50 @@ pub const Builder = struct {
     allocator: std.mem.Allocator,
 
     /// Initialize with explicit allocator
-    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32) !Builder {
+    pub fn init(allocator: std.mem.Allocator, width: i32, height: i32, game_state: *state.GameState) !Builder {
         return .{
-            .scene = try Scene.init(allocator, width, height),
+            .scene = try Scene.init(allocator, width, height, game_state),
             .allocator = allocator,
         };
     }
 
     /// Initialize using scene arena allocator
-    pub fn initForScene(width: i32, height: i32) !Builder {
-        return Builder.init(mem.scene(), width, height);
+    pub fn initForScene(width: i32, height: i32, game_state: *state.GameState) !Builder {
+        return Builder.init(mem.scene(), width, height, game_state);
     }
 
     /// Initialize VN scene with explicit allocator
-    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32) !Builder {
+    pub fn initVN(allocator: std.mem.Allocator, width: i32, height: i32, game_state: *state.GameState) !Builder {
         return .{
-            .scene = try Scene.initVN(allocator, width, height),
+            .scene = try Scene.initVN(allocator, width, height, game_state),
             .allocator = allocator,
         };
     }
 
     /// Initialize VN scene using scene arena allocator
-    pub fn initVNForScene(width: i32, height: i32) !Builder {
-        return Builder.initVN(mem.scene(), width, height);
+    pub fn initVNForScene(width: i32, height: i32, game_state: *state.GameState) !Builder {
+        return Builder.initVN(mem.scene(), width, height, game_state);
     }
 
-    pub fn reset(self: *Builder, width: i32, height: i32) !*Builder {
+    pub fn reset(self: *Builder, width: i32, height: i32, game_state: *state.GameState) !*Builder {
         if (self.scene.world_initialized) {
             self.scene.deinit();
         }
-        self.scene = try Scene.init(self.allocator, width, height);
+        self.scene = try Scene.init(self.allocator, width, height, game_state);
         return self;
     }
 
-    pub fn resetVN(self: *Builder, width: i32, height: i32) !*Builder {
+    pub fn resetVN(self: *Builder, width: i32, height: i32, game_state: *state.GameState) !*Builder {
         if (self.scene.world_initialized) {
             self.scene.deinit();
         }
-        self.scene = try Scene.initVN(self.allocator, width, height);
+        self.scene = try Scene.initVN(self.allocator, width, height, game_state);
         return self;
     }
 
-    pub fn buildAndReset(self: *Builder, width: i32, height: i32) !Scene {
+    pub fn buildAndReset(self: *Builder, width: i32, height: i32, game_state: *state.GameState) !Scene {
         const out = self.scene;
-        self.scene = try Scene.init(self.allocator, width, height);
+        self.scene = try Scene.init(self.allocator, width, height, game_state);
         return out;
     }
 
@@ -352,9 +353,9 @@ pub const Builder = struct {
             .withSprite(config.texture)
             .withPlayerController(config.speed)
             .withBoxCollider(
-            @floatFromInt(config.texture.width),
-            @floatFromInt(config.texture.height),
-        )
+                @floatFromInt(config.texture.width),
+                @floatFromInt(config.texture.height),
+            )
             .build();
 
         if (self.scene.world.findByTag("main_camera")) |cam_entity| {
@@ -409,6 +410,8 @@ pub const TransitionState = enum {
 };
 
 pub const SceneManager = struct {
+    game_state: *state.GameState = undefined,
+
     scenes: []Scene,
     currentIndex: usize = 0,
     lastIndex: usize = 0,
@@ -439,17 +442,18 @@ pub const SceneManager = struct {
     onTransition: ?*const fn (*Scene, *SceneManager, usize) bool = null,
 
     /// Initialize using the permanent arena for scene manager data
-    pub fn init(capacity: usize) !SceneManager {
+    pub fn init(capacity: usize, game_state: *state.GameState) !SceneManager {
         const allocator = mem.permanent();
         const scenes_ptr = try allocator.alloc(Scene, capacity);
         for (scenes_ptr) |*s| {
-            s.* = try Scene.init(allocator, 800, 450);
+            s.* = try Scene.init(allocator, 800, 450, game_state);
         }
         const history_ptr = try allocator.alloc(usize, capacity);
         @memset(history_ptr, 0);
 
         return .{
             .scenes = scenes_ptr,
+            .game_state = game_state,
             .allocator = null,
             .capacity = capacity,
             .history = history_ptr,

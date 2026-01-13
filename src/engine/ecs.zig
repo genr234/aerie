@@ -4,6 +4,7 @@ const dialogue = @import("dialogue.zig");
 const sprites = @import("sprites.zig");
 const events = @import("events.zig");
 const root = @import("../root.zig");
+const state = @import("state.zig");
 
 pub const Entity = struct {
     id: u32,
@@ -288,7 +289,7 @@ pub const World = struct {
     free_list: std.array_list.Aligned(u32, null) = .{},
     entity_count: u32 = 0,
 
-    events: events.EventQueue,
+    state: *state.GameState = undefined,
 
     tags: ComponentStorage(TagComponent) = .{},
     transforms: ComponentStorage(Transform) = .{},
@@ -306,10 +307,10 @@ pub const World = struct {
 
     max_entities: usize = 0,
 
-    pub fn init(allocator: std.mem.Allocator, max_entities: usize) !Self {
+    pub fn init(allocator: std.mem.Allocator, max_entities: usize, game_state: *state.GameState) !Self {
         var self = Self{
             .allocator = allocator,
-            .events = events.EventQueue.init(),
+            .state = game_state,
             .max_entities = max_entities,
         };
 
@@ -486,7 +487,7 @@ pub const World = struct {
 
 pub const Systems = struct {
     pub fn processEvents(world: *World, dt: f32) void {
-        world.events.process(dt);
+        world.state.eventQueue.process(dt);
     }
 
     pub fn playerMovement(world: *World, dt: f32) void {
@@ -622,13 +623,13 @@ pub const Systems = struct {
                 switch (trigger.action) {
                     .print_message => |buf| {
                         const len = std.mem.indexOfScalar(u8, &buf, 0) orelse buf.len;
-                        world.events.push(events.showMessage(buf[0..len], 2.0)) catch {};
+                        world.state.eventQueue.push(events.showMessage(buf[0..len], 2.0)) catch {};
                     },
                     .start_dialogue => |payload| {
-                        world.events.push(events.startDialogue(payload.runner, payload.context)) catch {};
+                        world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
                     },
                     .run_action => |action| {
-                        world.events.push(events.customEvent(action(world))) catch {};
+                        world.state.eventQueue.push(events.customEvent(action(world))) catch {};
                     },
                 }
                 if (trigger.one_shot) trigger.triggered = true;
