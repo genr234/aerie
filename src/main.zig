@@ -11,6 +11,8 @@ const events = @import("engine/events.zig");
 const assets = @import("engine/utils/assets.zig");
 const ui = @import("engine/ui.zig");
 const state = @import("engine/state.zig");
+const scripting = @import("engine/scripting/runtime.zig");
+const scripting_context = @import("engine/scripting/context.zig");
 
 // Emscripten imports
 extern "c" fn emscripten_set_main_loop(func: *const fn () callconv(.c) void, fps: i32, simulate_infinite_loop: i32) void;
@@ -23,6 +25,9 @@ var initialized: bool = false;
 
 var sceneManager: scenes.SceneManager = undefined;
 var sceneBuilder: scenes.Builder = undefined;
+
+var scriptCtx: scripting_context.ScriptingContext = undefined;
+var wrenRuntime: ?scripting.Runtime = null;
 
 fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) bool {
     _ = scene;
@@ -122,11 +127,27 @@ fn init() !void {
         .triggerZone("dialogue_trigger", .{ .x = 300, .y = 200, .width = 50, .height = 50 }, ecs.TriggerDialogueStart(&gameState.gameDialogue, null), false)
         .build();
 
+    // Init Wren scripting (calls Game.onBoot()).
+    scriptCtx = .{
+        .eventQueue = &gameState.eventQueue,
+        .storyState = &gameState.storyState,
+        .sceneManager = gameState.manager,
+        .gameDialogue = &gameState.gameDialogue,
+        .vnDialogue = &gameState.vnDialogue,
+        .vnActive = &gameState.vnActive,
+    };
+    wrenRuntime = scripting.Runtime.init(mem.permanent(), &scriptCtx) catch null;
+
     initialized = true;
 }
 
 fn deinit() void {
     if (!initialized) return;
+
+    if (wrenRuntime) |*rt| {
+        rt.deinit();
+        wrenRuntime = null;
+    }
 
     gameState.manager.deinit();
     gameState.gameDialogue.deinit();
@@ -160,6 +181,11 @@ fn update() !void {
         gameState.vnState.handleInput();
         gameState.vnState.update(deltaTime);
 
+        if (wrenRuntime) |*rt| {
+            rt.reloadIfChanged();
+            _ = rt.callOnUpdate(deltaTime);
+        }
+
         gameState.eventQueue.process(deltaTime);
         return;
     }
@@ -184,6 +210,11 @@ fn update() !void {
 
     const isPaused = gameState.gameDialogue.isActive() or gameState.manager.inputBlocked;
     currentScene.runSystems(deltaTime, isPaused);
+
+    if (wrenRuntime) |*rt| {
+        rt.reloadIfChanged();
+        _ = rt.callOnUpdate(deltaTime);
+    }
 
     gameState.eventQueue.process(deltaTime);
 }
@@ -226,15 +257,13 @@ fn draw() void {
 
     rl.drawText(rl.textFormat("Scene: %d", .{gameState.manager.currentIndex}), 10, 10, 20, .green);
 
-    ui.drawFromEventQueue(gameState.eventQueue, .{
-        .toast = .{
-            .origin = .{ .x = 10, .y = 40 },
-            .lineHeight = 24,
-            .fontSize = 20,
-            .color = .black,
-            .maxLines = 4,
-        }
-    });
+    ui.drawFromEventQueue(gameState.eventQueue, .{ .toast = .{
+        .origin = .{ .x = 10, .y = 40 },
+        .lineHeight = 24,
+        .fontSize = 20,
+        .color = .black,
+        .maxLines = 4,
+    } });
 
     gameState.manager.draw();
 

@@ -10,6 +10,7 @@ pub const events = @import("engine/events.zig");
 pub const story = @import("engine/story.zig");
 pub const vn = @import("engine/vn.zig");
 pub const audio = @import("engine/audio.zig");
+pub const scripting = @import("engine/scripting/runtime.zig");
 
 pub fn bufferedPrint() !void {
     // Stdout is for the actual output of your application, for example if you
@@ -23,4 +24,3 @@ pub fn bufferedPrint() !void {
 
     try stdout.flush(); // Don't forget to flush!
 }
-

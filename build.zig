@@ -174,6 +174,34 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const wren_lib = b.addLibrary(.{
+        .name = "wren",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+        }),
+        .linkage = .static,
+    });
+    wren_lib.linkLibC();
+    wren_lib.addIncludePath(b.path("src/third-party/wren/src/include"));
+    wren_lib.addIncludePath(b.path("src/third-party/wren/src/vm"));
+    wren_lib.addIncludePath(b.path("src/third-party/wren/src/optional"));
+
+    wren_lib.addCSourceFiles(.{
+        .root = b.path("src/third-party/wren/src"),
+        .files = &.{
+            "vm/wren_compiler.c",
+            "vm/wren_core.c",
+            "vm/wren_debug.c",
+            "vm/wren_primitive.c",
+            "vm/wren_utils.c",
+            "vm/wren_value.c",
+            "vm/wren_vm.c",
+            "optional/wren_opt_meta.c",
+            "optional/wren_opt_random.c",
+        },
+    });
+
     const raylib = raylib_dep.module("raylib"); // main raylib module
     const raygui = raylib_dep.module("raygui"); // raygui module
     const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
@@ -196,6 +224,8 @@ pub fn build(b: *std.Build) void {
         });
 
         wasm.linkLibrary(raylib_artifact);
+        wasm.linkLibrary(wren_lib);
+        wasm.addIncludePath(b.path("src/third-party/wren/src/include"));
         wasm.root_module.addImport("raylib", raylib);
         wasm.root_module.addImport("raygui", raygui);
 
@@ -238,6 +268,8 @@ pub fn build(b: *std.Build) void {
 
     if (exe != null) {
         exe.?.linkLibrary(raylib_artifact);
+        exe.?.linkLibrary(wren_lib);
+        exe.?.addIncludePath(b.path("src/third-party/wren/src/include"));
         exe.?.root_module.addImport("raylib", raylib);
         exe.?.root_module.addImport("raygui", raygui);
     }
