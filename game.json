@@ -1,0 +1,8 @@
+{
+  "id": "demo",
+  "title": "Test Game",
+  "version": "0.1.0",
+  "entry": { "module": "main", "class": "Game" },
+  "start_scene": "assets/scenes/start.json",
+  "window": { "width": 800, "height": 450, "title": "Test Game" }
+}

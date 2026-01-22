@@ -5,11 +5,36 @@ const events = @import("../events.zig");
 const story = @import("../story.zig");
 
 const context = @import("context.zig");
+const runtime_mod = @import("runtime.zig");
 const wren_c = @import("wren_c.zig");
+
+pub const Functions = enum {
+    showMessage,
+    setFlag,
+    getFlag,
+    changeSceneByIndex,
+    changeSceneByName,
+    startDialogue,
+    startDialogueAt,
+};
 
 pub const Api = struct {
     pub fn bind(vm: *wren_c.c.WrenVM) void {
         _ = vm;
+    }
+
+    pub fn foreignClass(
+        vm: ?*wren_c.c.WrenVM,
+        module: [*c]const u8,
+        class_name: [*c]const u8,
+    ) callconv(.c) wren_c.c.WrenForeignClassMethods {
+        _ = vm;
+        _ = module;
+        _ = class_name;
+
+        // All foreign classes we expose are only used for static methods, so they
+        // should never be instantiated.
+        return .{ .allocate = null, .finalize = null };
     }
 
     pub fn foreignMethod(
@@ -26,40 +51,32 @@ pub const Api = struct {
         const klass = std.mem.span(class_name);
         const sig = std.mem.span(signature);
 
-        if (is_static and std.mem.eql(u8, klass, "Events") and std.mem.eql(u8, sig, "showMessage(_,_)")) {
-            return &events_showMessage;
-        }
+        const call = std.meta.stringToEnum(Functions, sig);
 
-        if (is_static and std.mem.eql(u8, klass, "Story") and std.mem.eql(u8, sig, "setFlag(_,_)")) {
-            return &story_setFlag;
-        }
-
-        if (is_static and std.mem.eql(u8, klass, "Story") and std.mem.eql(u8, sig, "getFlag(_)")) {
-            return &story_getFlag;
-        }
-
-        if (is_static and std.mem.eql(u8, klass, "Scene") and std.mem.eql(u8, sig, "change(_)")) {
-            return &scene_change;
-        }
-
-        if (is_static and std.mem.eql(u8, klass, "Scene") and std.mem.eql(u8, sig, "changeByName(_)")) {
-            return &scene_changeByName;
-        }
-
-        if (is_static and std.mem.eql(u8, klass, "Dialogue") and std.mem.eql(u8, sig, "start()")) {
-            return &dialogue_start;
-        }
-
-        if (is_static and std.mem.eql(u8, klass, "Dialogue") and std.mem.eql(u8, sig, "startAt(_)")) {
-            return &dialogue_startAt;
+        if (is_static and std.mem.eql(u8, klass, "Engine")) {
+            if (call) |valid_call| {
+                switch (valid_call) {
+                    .showMessage => return &events_showMessage,
+                    .setFlag => return &story_setFlag,
+                    .getFlag => return &story_getFlag,
+                    .changeSceneByIndex => return &scene_change,
+                    .changeSceneByName => return &scene_changeByName,
+                    .startDialogue => return &dialogue_start,
+                    .startDialogueAt => return &dialogue_startAt,
+                }
+            } else {
+                return null;
+            }
         }
 
         return null;
     }
 
     fn getCtx(vm: *wren_c.c.WrenVM) *context.ScriptingContext {
-        const ud = wren_c.c.wrenGetUserData(vm);
-        return @ptrCast(@alignCast(ud));
+        // userData stores `*Runtime`; ctx lives on that struct.
+        const rt = wren_c.c.wrenGetUserData(vm) orelse unreachable;
+        const runtime: *const runtime_mod.Runtime = @ptrCast(@alignCast(rt));
+        return runtime.ctx;
     }
 
     fn getSlotString(vm: *wren_c.c.WrenVM, slot: c_int, buf: []u8) []const u8 {
@@ -76,8 +93,12 @@ pub const Api = struct {
         const text = getSlotString(vm, 1, &text_buf);
         const duration = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
 
+        std.debug.print("[wren->zig] showMessage '{s}' ({d:.2}s)\n", .{ text, duration });
+
         var ctx = getCtx(vm);
-        ctx.eventQueue.push(events.showMessage(text, duration)) catch {};
+        ctx.eventQueue.push(events.showMessage(text, duration)) catch |err| {
+            std.debug.print("[wren->zig] eventQueue.push failed: {any}\n", .{err});
+        };
     }
 
     fn story_setFlag(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {

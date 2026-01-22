@@ -95,29 +95,51 @@ pub const Camera = struct {
 };
 
 pub const TriggerAction = union(enum) {
-    print_message: [128]u8,
+    show_message: struct {
+        text: [128]u8,
+        duration: f32 = 2.0,
+    },
     start_dialogue: struct {
         runner: *dialogue.Runner,
         context: ?*anyopaque,
+        label: [events.MAX_ID_LEN]u8,
+        label_len: usize = 0,
+    },
+    change_scene: struct {
+        index: usize,
+    },
+    set_flag: struct {
+        name: [events.MAX_ID_LEN]u8,
+        name_len: usize,
+        value: bool,
     },
     run_action: dialogue.ActionFn,
 };
 
-pub fn TriggerPrintAction(msg: []const u8) TriggerAction {
-    var action = TriggerAction{ .print_message = [_]u8{0} ** 128 };
-    const copy_len: usize = @min(msg.len, action.print_message.len - 1);
-    @memcpy(action.print_message[0..copy_len], msg[0..copy_len]);
-    action.print_message[copy_len] = 0;
+pub fn TriggerShowMessage(text: []const u8, duration: f32) TriggerAction {
+    var action = TriggerAction{ .show_message = .{ .text = [_]u8{0} ** 128, .duration = duration } };
+    const copy_len: usize = @min(text.len, action.show_message.text.len - 1);
+    @memcpy(action.show_message.text[0..copy_len], text[0..copy_len]);
+    action.show_message.text[copy_len] = 0;
     return action;
 }
 
-pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque) TriggerAction {
-    return TriggerAction{
-        .start_dialogue = .{
-            .runner = runner,
-            .context = context,
-        },
-    };
+pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque, label: ?[]const u8) TriggerAction {
+    var out: TriggerAction = .{ .start_dialogue = .{
+        .runner = runner,
+        .context = context,
+        .label = [_]u8{0} ** events.MAX_ID_LEN,
+        .label_len = 0,
+    } };
+
+    if (label) |lbl| {
+        const len = @min(lbl.len, events.MAX_ID_LEN - 1);
+        @memcpy(out.start_dialogue.label[0..len], lbl[0..len]);
+        out.start_dialogue.label[len] = 0;
+        out.start_dialogue.label_len = len;
+    }
+
+    return out;
 }
 
 pub fn TriggerRunAction(action: dialogue.ActionFn) TriggerAction {
@@ -621,12 +643,22 @@ pub const Systems = struct {
             if (inside and !trigger.was_inside) {
                 // Just entered trigger
                 switch (trigger.action) {
-                    .print_message => |buf| {
-                        const len = std.mem.indexOfScalar(u8, &buf, 0) orelse buf.len;
-                        world.state.eventQueue.push(events.showMessage(buf[0..len], 2.0)) catch {};
+                    .show_message => |payload| {
+                        const len = std.mem.indexOfScalar(u8, &payload.text, 0) orelse payload.text.len;
+                        world.state.eventQueue.push(events.showMessage(payload.text[0..len], payload.duration)) catch {};
                     },
                     .start_dialogue => |payload| {
-                        world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
+                        if (payload.label_len > 0) {
+                            world.state.eventQueue.push(events.startDialogueAt(payload.runner, payload.context, payload.label[0..payload.label_len])) catch {};
+                        } else {
+                            world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
+                        }
+                    },
+                    .change_scene => |cs| {
+                        world.state.eventQueue.push(events.changeSceneByIndex(cs.index)) catch {};
+                    },
+                    .set_flag => |sf| {
+                        world.state.eventQueue.push(events.setFlag(sf.name[0..sf.name_len], sf.value)) catch {};
                     },
                     .run_action => |action| {
                         world.state.eventQueue.push(events.customEvent(action(world))) catch {};
@@ -848,4 +880,3 @@ pub const EntityBuilder = struct {
         return self.entity;
     }
 };
-

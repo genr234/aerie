@@ -3,8 +3,8 @@
   <component name="BuildScanner">
     <option name="projects">
       <list><![CDATA[{
-  "name": null,
-  "version": null,
+  "name": "game_engine",
+  "version": "0.0.0",
   "path": "/Users/sunlightdev/game-engine",
   "steps": [
     {
@@ -57,8 +57,8 @@
     }
   ]
 }]]><![CDATA[{
-  "name": null,
-  "version": null,
+  "name": "raylib_zig",
+  "version": "5.6.0-dev",
   "path": "/Users/sunlightdev/.cache/zig/p/raylib_zig-5.6.0-dev-KE8REL5MBQAf3p497t52Xw9P7ojndIkVOWPXnLiLLw2P",
   "steps": [
     {
@@ -1426,8 +1426,8 @@
     }
   ]
 }]]><![CDATA[{
-  "name": null,
-  "version": null,
+  "name": "raylib",
+  "version": "5.6.0-dev",
   "path": "/Users/sunlightdev/.cache/zig/p/raylib-5.6.0-dev-whq8uCg2ywTzCiX3VEP9RuCMXR6_VnDBmkj8GjL_p5QN",
   "steps": [
     {
@@ -3148,7 +3148,7 @@
     }
   ]
 }]]><![CDATA[{
-  "name": null,
+  "name": "xcode_frameworks",
   "version": null,
   "path": "/Users/sunlightdev/.cache/zig/p/N-V-__8AABHMqAWYuRdIlflwi8gksPnlUMQBiSxAqQAAZFms",
   "steps": [
@@ -3166,7 +3166,7 @@
   "modules": [],
   "dependencies": []
 }]]><![CDATA[{
-  "name": null,
+  "name": "emsdk",
   "version": null,
   "path": "/Users/sunlightdev/.cache/zig/p/N-V-__8AAJl1DwBezhYo_VE6f53mPVm00R-Fk28NPW7P14EQ",
   "steps": [
@@ -3184,8 +3184,8 @@
   "modules": [],
   "dependencies": []
 }]]><![CDATA[{
-  "name": null,
-  "version": null,
+  "name": "zemscripten",
+  "version": "0.2.0-dev",
   "path": "/Users/sunlightdev/.cache/zig/p/zemscripten-0.2.0-dev-sRlDqApRAACspTbAZnuNKWIzfWzSYgYkb2nWAXZ-tqqt",
   "steps": [
     {
@@ -3208,7 +3208,7 @@
   ],
   "dependencies": []
 }]]><![CDATA[{
-  "name": null,
+  "name": "raygui",
   "version": null,
   "path": "/Users/sunlightdev/.cache/zig/p/N-V-__8AALUbbwDKkSH4nbf3Ml_dTWo9qbELvle5i9eQZMuo",
   "steps": [
@@ -3226,8 +3226,8 @@
   "modules": [],
   "dependencies": []
 }]]><![CDATA[{
-  "name": null,
-  "version": null,
+  "name": "zemscripten",
+  "version": "0.2.0-dev",
   "path": "/Users/sunlightdev/.cache/zig/p/zemscripten-0.2.0-dev-sRlDqFJSAAB8hgnRt5DDMKP3zLlDtMnUDwYRJVCa5lGY",
   "steps": [
     {

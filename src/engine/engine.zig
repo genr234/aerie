@@ -4,6 +4,7 @@ pub const rl = @import("raylib");
 
 const mem = @import("memory.zig");
 const scenes = @import("scenes.zig");
+const project = @import("project.zig");
 const dialogue = @import("dialogue.zig");
 const ecs = @import("ecs.zig");
 const story = @import("story.zig");
@@ -15,6 +16,9 @@ const vn = @import("vn.zig");
 
 const scripting = @import("scripting/runtime.zig");
 const scripting_context = @import("scripting/context.zig");
+
+const sceneio_json = @import("sceneio/json.zig");
+const sceneio_instantiate = @import("sceneio/instantiate.zig");
 
 pub const screenWidth = 800;
 pub const screenHeight = 450;
@@ -36,7 +40,14 @@ pub const Engine = struct {
     pub fn init(self: *Self) !void {
         mem.init();
 
-        rl.initWindow(screenWidth, screenHeight, "Test Game");
+        const project_cfg = project.loadProjectConfig(mem.permanent(), ".") catch project.ProjectConfig{
+            .id = "demo",
+            .title = "Test Game",
+        };
+
+        const ztitle = try std.fmt.allocPrint(mem.frame(), "{s}", .{project_cfg.window_title});
+        ztitle.ptr[ztitle.len] = 0;
+        rl.initWindow(project_cfg.window_width, project_cfg.window_height, @ptrCast(ztitle.ptr[0..ztitle.len :0]));
         rl.setTargetFPS(60);
 
         const player_path = try assets.parseAssetPath(mem.frame(), "player.png", builtin.os.tag);
@@ -45,39 +56,19 @@ pub const Engine = struct {
             return err;
         };
 
-        // Dialogue scripts live for engine lifetime.
-        var builder = dialogue.Builder.init(mem.permanent());
-        defer builder.deinit();
-
-        _ = builder.say("Narrator", "Hello!");
-        _ = builder.ask("Narrator", "Choose an option", &[_]dialogue.Option{
-            .{ .text = "option one", .goto = "skip" },
-            .{ .text = "option two", .goto = "skip" },
-        });
-        _ = builder.label("skip");
-        _ = builder.say("Narrator", "The end.");
-        _ = builder.done();
-
-        self.gameState.script = try builder.build();
-        self.gameState.gameDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.script);
-
+        // Systems
         self.gameState.eventQueue = events.EventQueue.init();
         self.gameState.storyState = story.StoryState.initWithEvents(&self.gameState.eventQueue);
 
+        var builder = dialogue.Builder.init(mem.permanent());
+        defer builder.deinit();
+        _ = builder.done();
+        self.gameState.script = try builder.build();
+        self.gameState.gameDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.script);
+
         var vnBuilder = dialogue.Builder.init(mem.permanent());
         defer vnBuilder.deinit();
-
-        _ = vnBuilder.say("???", "Vn mode");
-        _ = vnBuilder.ask("Narrator", "What will you do?", &[_]dialogue.Option{
-            .{ .text = "Continue", .goto = "continue" },
-            .{ .text = "Exit", .goto = "exit" },
-        });
-        _ = vnBuilder.label("continue");
-        _ = vnBuilder.say("Narrator", "You chose to continue.");
-        _ = vnBuilder.label("exit");
-        _ = vnBuilder.say("Narrator", "Goodbye for now.");
         _ = vnBuilder.done();
-
         self.gameState.vnScript = try vnBuilder.build();
         self.gameState.vnDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.vnScript);
 
@@ -101,27 +92,17 @@ pub const Engine = struct {
             .storyState = &self.gameState.storyState,
         });
 
-        self.gameState.manager.scenes[0] = self.gameState.sceneBuilder
-            .camera("main_camera", .{
-                .offset = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
-                .target = .{ .x = 0, .y = 0 },
-                .rotation = 0,
-                .zoom = 1.0,
-            })
-            .player("player", .{
-                .texture = self.gameState.playerTexture,
-                .speed = 100,
-                .spawn = .{ .x = screenWidth / 2.0, .y = screenHeight / 2.0 },
-            })
-            .circle("origin_circle", .{ .x = 0, .y = 0 }, 4, rl.Color.blue)
-            .rect("trigger_zone", .{ .x = 300, .y = 200 }, .{ .x = 50, .y = 50 }, rl.Color.green)
-            .triggerZone(
-                "dialogue_trigger",
-                .{ .x = 300, .y = 200, .width = 50, .height = 50 },
-                ecs.TriggerDialogueStart(&self.gameState.gameDialogue, null),
-                false,
-            )
-            .build();
+        var scene0 = try scenes.Scene.initForScene(project_cfg.window_width, project_cfg.window_height, &self.gameState);
+        const ir = try sceneio_json.loadSceneIR(mem.frame(), project_cfg.start_scene);
+
+        const textures = sceneio_instantiate.TextureTable{ .player = self.gameState.playerTexture };
+        const dialogue_bindings = sceneio_instantiate.DialogueBindings{
+            .game = @ptrCast(&self.gameState.gameDialogue),
+            .vn = @ptrCast(&self.gameState.vnDialogue),
+        };
+
+        try sceneio_instantiate.instantiateSceneIR(mem.frame(), &scene0, &ir, &textures, dialogue_bindings);
+        self.gameState.manager.scenes[0] = scene0;
 
         self.scriptCtx = .{
             .eventQueue = &self.gameState.eventQueue,
@@ -131,7 +112,10 @@ pub const Engine = struct {
             .vnDialogue = &self.gameState.vnDialogue,
             .vnActive = &self.gameState.vnActive,
         };
-        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx) catch null;
+        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
+            std.debug.print("[wren] runtime init failed: {any}\n", .{err});
+            break :blk null;
+        };
 
         self.modeStack.push(@constCast(&ExplorationMode)) catch {};
 
@@ -258,13 +242,8 @@ fn explorationUpdate(_: *Mode, engine: *Engine, dt: f32) void {
     dialogue.handleInput(&engine.gameState.gameDialogue);
 
     if (rl.isKeyPressed(.r)) {
-        const nextSceneIdx = engine.gameState.manager.currentIndex + 1;
-        if (nextSceneIdx < 10 and !engine.gameState.isTransitioning) {
-            engine.gameState.isTransitioning = true;
-            mem.resetScene();
-            engine.gameState.manager.changeScene(nextSceneIdx) catch {};
-            engine.gameState.isTransitioning = false;
-        }
+        // Transition hotkey was for the old demo multi-scene setup.
+        // With project-driven loading we keep this disabled for now.
     }
 
     const currentScene = engine.gameState.manager.currentScene();

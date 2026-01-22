@@ -1,0 +1,46 @@
+{
+  "name": "start",
+  "type": "exploration",
+  "size": { "width": 800, "height": 450 },
+  "entities": [
+    {
+      "tag": "main_camera",
+      "components": {
+        "Transform": { "position": [0, 0] },
+        "Camera": { "offset": [400, 225], "zoom": 1.0, "followTag": "player" }
+      }
+    },
+    {
+      "tag": "player",
+      "components": {
+        "Transform": { "position": [400, 225] },
+        "Sprite": { "texture": "player.png" },
+        "PlayerController": { "speed": 100 }
+      }
+    },
+    {
+      "tag": "origin_circle",
+      "components": {
+        "Transform": { "position": [0, 0] },
+        "Circle": { "radius": 4, "color": "blue" }
+      }
+    },
+    {
+      "tag": "trigger_zone",
+      "components": {
+        "Transform": { "position": [300, 200] },
+        "Rect": { "width": 50, "height": 50, "color": "green" }
+      }
+    },
+    {
+      "tag": "dialogue_trigger",
+      "components": {
+        "Trigger": {
+          "bounds": [300, 200, 50, 50],
+          "oneShot": false,
+          "action": { "startDialogue": {} }
+        }
+      }
+    }
+  ]
+}
