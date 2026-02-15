@@ -141,7 +141,6 @@ pub const RelationshipEntry = struct {
     }
 };
 
-
 pub const StoryState = struct {
     // Boolean flags
     flags: [MAX_FLAGS]FlagEntry = undefined,
@@ -339,6 +338,10 @@ pub const StoryState = struct {
         self.currentChapter = chapter;
     }
 
+    pub fn getChapter(self: *const Self) usize {
+        return self.currentChapter;
+    }
+
     pub fn setRoute(self: *Self, route: []const u8) void {
         const len = @min(route.len, MAX_NAME_LEN - 1);
         @memcpy(self.currentRoute[0..len], route[0..len]);
@@ -349,7 +352,6 @@ pub const StoryState = struct {
     pub fn getRoute(self: *const Self) []const u8 {
         return self.currentRoute[0..self.routeLen];
     }
-
 
     pub fn update(self: *Self, dt: f64) void {
         self.playTime += dt;

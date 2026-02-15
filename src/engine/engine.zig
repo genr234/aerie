@@ -33,14 +33,17 @@ pub const Engine = struct {
     scriptCtx: scripting_context.ScriptingContext = undefined,
     wrenRuntime: ?scripting.Runtime = null,
 
+    project_root: []const u8 = ".",
+
     modeStack: ModeStack = .{},
 
     const Self = @This();
 
-    pub fn init(self: *Self) !void {
+    pub fn init(self: *Self, project_root: []const u8) !void {
         mem.init();
+        self.project_root = project_root;
 
-        const project_cfg = project.loadProjectConfig(mem.permanent(), ".") catch project.ProjectConfig{
+        const project_cfg = project.loadProjectConfig(mem.permanent(), project_root) catch project.ProjectConfig{
             .id = "demo",
             .title = "Test Game",
         };
@@ -50,7 +53,7 @@ pub const Engine = struct {
         rl.initWindow(project_cfg.window_width, project_cfg.window_height, @ptrCast(ztitle.ptr[0..ztitle.len :0]));
         rl.setTargetFPS(60);
 
-        const player_path = try assets.parseAssetPath(mem.frame(), "player.png", builtin.os.tag);
+        const player_path = try assets.parseAssetPath(mem.frame(), project_root, "player.png", builtin.os.tag);
         self.gameState.playerTexture = rl.loadTexture(player_path) catch |err| {
             std.debug.print("Failed to load texture: {s}\n", .{player_path});
             return err;
@@ -93,7 +96,9 @@ pub const Engine = struct {
         });
 
         var scene0 = try scenes.Scene.initForScene(project_cfg.window_width, project_cfg.window_height, &self.gameState);
-        const ir = try sceneio_json.loadSceneIR(mem.frame(), project_cfg.start_scene);
+        const scene_path = try assets.resolveAssetPath(mem.frame(), project_root, project_cfg.start_scene, builtin.os.tag);
+        defer mem.frame().free(scene_path);
+        const ir = try sceneio_json.loadSceneIR(mem.frame(), scene_path);
 
         const textures = sceneio_instantiate.TextureTable{ .player = self.gameState.playerTexture };
         const dialogue_bindings = sceneio_instantiate.DialogueBindings{
@@ -112,7 +117,7 @@ pub const Engine = struct {
             .vnDialogue = &self.gameState.vnDialogue,
             .vnActive = &self.gameState.vnActive,
         };
-        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
+        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, project_root, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
             std.debug.print("[wren] runtime init failed: {any}\n", .{err});
             break :blk null;
         };
@@ -168,6 +173,7 @@ pub const Engine = struct {
 
         if (self.wrenRuntime) |*rt| {
             rt.reloadIfChanged();
+            rt.dispatchInput(dt);
             _ = rt.callOnUpdate(dt);
         }
 
