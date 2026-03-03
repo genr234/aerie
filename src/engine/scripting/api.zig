@@ -3,12 +3,84 @@ const std = @import("std");
 const dialogue = @import("../dialogue.zig");
 const events = @import("../events.zig");
 const story = @import("../story.zig");
+const ui = @import("../ui.zig");
 
 const context = @import("context.zig");
 const runtime_mod = @import("runtime.zig");
 const wren_c = @import("wren_c.zig");
 
 pub const Api = struct {
+    const engine_map = std.StaticStringMap(wren_c.c.WrenForeignMethodFn).initComptime(.{
+        .{ "showMessage(_,_)", &events_showMessage },
+        .{ "playSound(_,_,_)", &events_playSound },
+        .{ "pause(_)", &events_pause },
+        .{ "quit", &events_quit },
+        .{ "quit()", &events_quit },
+        .{ "setFlag(_,_)", &story_setFlag },
+        .{ "getFlag(_)", &story_getFlag },
+        .{ "toggleFlag(_)", &story_toggleFlag },
+        .{ "hasFlag(_)", &story_hasFlag },
+        .{ "setInt(_,_)", &story_setInt },
+        .{ "getInt(_)", &story_getInt },
+        .{ "addInt(_,_)", &story_addInt },
+        .{ "setFloat(_,_)", &story_setFloat },
+        .{ "getFloat(_)", &story_getFloat },
+        .{ "setString(_,_)", &story_setString },
+        .{ "getString(_)", &story_getString },
+        .{ "setRelationship(_,_)", &story_setRelationship },
+        .{ "getRelationship(_)", &story_getRelationship },
+        .{ "modifyRelationship(_,_)", &story_modifyRelationship },
+        .{ "setChapter(_)", &story_setChapter },
+        .{ "getChapter", &story_getChapter },
+        .{ "getChapter()", &story_getChapter },
+        .{ "setRoute(_)", &story_setRoute },
+        .{ "getRoute", &story_getRoute },
+        .{ "getRoute()", &story_getRoute },
+        .{ "getPlayTimeMinutes", &story_getPlayTimeMinutes },
+        .{ "getPlayTimeMinutes()", &story_getPlayTimeMinutes },
+        .{ "change(_)", &scene_change },
+        .{ "changeByName(_)", &scene_changeByName },
+        .{ "currentIndex", &scene_currentIndex },
+        .{ "currentIndex()", &scene_currentIndex },
+        .{ "findIndex(_)", &scene_findIndex },
+        .{ "sceneCount", &scene_count },
+        .{ "sceneCount()", &scene_count },
+        .{ "start", &dialogue_start },
+        .{ "start()", &dialogue_start },
+        .{ "startAt(_)", &dialogue_startAt },
+        .{ "stopDialogue", &dialogue_stop },
+        .{ "stopDialogue()", &dialogue_stop },
+        .{ "dialogueIsActive", &dialogue_isActive },
+        .{ "dialogueIsActive()", &dialogue_isActive },
+        .{ "dialogueSkip", &dialogue_skip },
+        .{ "dialogueSkip()", &dialogue_skip },
+        .{ "dialogueAdvance", &dialogue_advance },
+        .{ "dialogueAdvance()", &dialogue_advance },
+        .{ "entityExists(_)", &entity_exists },
+        .{ "entitySetActive(_,_)", &entity_setActive },
+        .{ "entityGetPosition(_)", &entity_getPosition },
+        .{ "entitySetPosition(_,_,_)", &entity_setPosition },
+        .{ "onKeyPressed(_,_)", &input_onKeyPressed },
+        .{ "onKeyReleased(_,_)", &input_onKeyReleased },
+        .{ "onAnyKey(_)", &input_onAnyKey },
+        .{ "onMousePressed(_,_)", &input_onMousePressed },
+        .{ "onMouseMove(_)", &input_onMouseMove },
+        .{ "onTick(_)", &input_onTick },
+    });
+
+    const ui_map = std.StaticStringMap(wren_c.c.WrenForeignMethodFn).initComptime(.{
+        .{ "button(_,_,_,_,_)", &ui_button },
+        .{ "text(_,_,_)", &ui_text },
+        .{ "panel(_,_,_,_)", &ui_panel },
+        .{ "bar(_,_,_,_,_,_)", &ui_bar },
+        .{ "inputField(_,_,_,_,_)", &ui_inputField },
+        .{ "getInputText", &ui_getInputText },
+        .{ "getInputText()", &ui_getInputText },
+        .{ "setInputText(_)", &ui_setInputText },
+        .{ "clearInput", &ui_clearInput },
+        .{ "clearInput()", &ui_clearInput },
+    });
+
     pub fn bind(vm: *wren_c.c.WrenVM) void {
         _ = vm;
     }
@@ -42,61 +114,11 @@ pub const Api = struct {
         const sig = std.mem.span(signature);
 
         if (is_static and std.mem.eql(u8, klass, "Engine")) {
-            if (std.mem.eql(u8, sig, "showMessage(_,_)")) return &events_showMessage;
-            if (std.mem.eql(u8, sig, "playSound(_,_,_)")) return &events_playSound;
-            if (std.mem.eql(u8, sig, "pause(_)")) return &events_pause;
-            if (std.mem.eql(u8, sig, "quit()") or std.mem.eql(u8, sig, "quit")) return &events_quit;
+            return @This().engine_map.get(sig) orelse null;
+        }
 
-            if (std.mem.eql(u8, sig, "setFlag(_,_)")) return &story_setFlag;
-            if (std.mem.eql(u8, sig, "getFlag(_)")) return &story_getFlag;
-            if (std.mem.eql(u8, sig, "toggleFlag(_)")) return &story_toggleFlag;
-            if (std.mem.eql(u8, sig, "hasFlag(_)")) return &story_hasFlag;
-
-            if (std.mem.eql(u8, sig, "setInt(_,_)")) return &story_setInt;
-            if (std.mem.eql(u8, sig, "getInt(_)")) return &story_getInt;
-            if (std.mem.eql(u8, sig, "addInt(_,_)")) return &story_addInt;
-
-            if (std.mem.eql(u8, sig, "setFloat(_,_)")) return &story_setFloat;
-            if (std.mem.eql(u8, sig, "getFloat(_)")) return &story_getFloat;
-
-            if (std.mem.eql(u8, sig, "setString(_,_)")) return &story_setString;
-            if (std.mem.eql(u8, sig, "getString(_)")) return &story_getString;
-
-            if (std.mem.eql(u8, sig, "setRelationship(_,_)")) return &story_setRelationship;
-            if (std.mem.eql(u8, sig, "getRelationship(_)")) return &story_getRelationship;
-            if (std.mem.eql(u8, sig, "modifyRelationship(_,_)")) return &story_modifyRelationship;
-
-            if (std.mem.eql(u8, sig, "setChapter(_)")) return &story_setChapter;
-            if (std.mem.eql(u8, sig, "getChapter()") or std.mem.eql(u8, sig, "getChapter")) return &story_getChapter;
-            if (std.mem.eql(u8, sig, "setRoute(_)")) return &story_setRoute;
-            if (std.mem.eql(u8, sig, "getRoute()") or std.mem.eql(u8, sig, "getRoute")) return &story_getRoute;
-            if (std.mem.eql(u8, sig, "getPlayTimeMinutes()") or std.mem.eql(u8, sig, "getPlayTimeMinutes")) return &story_getPlayTimeMinutes;
-
-            if (std.mem.eql(u8, sig, "change(_)")) return &scene_change;
-            if (std.mem.eql(u8, sig, "changeByName(_)")) return &scene_changeByName;
-            if (std.mem.eql(u8, sig, "currentIndex()") or std.mem.eql(u8, sig, "currentIndex")) return &scene_currentIndex;
-            if (std.mem.eql(u8, sig, "findIndex(_)")) return &scene_findIndex;
-            if (std.mem.eql(u8, sig, "sceneCount()") or std.mem.eql(u8, sig, "sceneCount")) return &scene_count;
-
-            if (std.mem.eql(u8, sig, "start()") or std.mem.eql(u8, sig, "start")) return &dialogue_start;
-            if (std.mem.eql(u8, sig, "startAt(_)")) return &dialogue_startAt;
-            if (std.mem.eql(u8, sig, "stopDialogue()") or std.mem.eql(u8, sig, "stopDialogue")) return &dialogue_stop;
-            if (std.mem.eql(u8, sig, "dialogueIsActive()") or std.mem.eql(u8, sig, "dialogueIsActive")) return &dialogue_isActive;
-            if (std.mem.eql(u8, sig, "dialogueSkip()") or std.mem.eql(u8, sig, "dialogueSkip")) return &dialogue_skip;
-            if (std.mem.eql(u8, sig, "dialogueAdvance()") or std.mem.eql(u8, sig, "dialogueAdvance")) return &dialogue_advance;
-
-            if (std.mem.eql(u8, sig, "entityExists(_)")) return &entity_exists;
-            if (std.mem.eql(u8, sig, "entitySetActive(_,_)")) return &entity_setActive;
-            if (std.mem.eql(u8, sig, "entityGetPosition(_)")) return &entity_getPosition;
-            if (std.mem.eql(u8, sig, "entitySetPosition(_,_,_)")) return &entity_setPosition;
-
-            if (std.mem.eql(u8, sig, "onKeyPressed(_,_)")) return &input_onKeyPressed;
-            if (std.mem.eql(u8, sig, "onKeyReleased(_,_)")) return &input_onKeyReleased;
-            if (std.mem.eql(u8, sig, "onAnyKey(_)")) return &input_onAnyKey;
-            if (std.mem.eql(u8, sig, "onMousePressed(_,_)")) return &input_onMousePressed;
-            if (std.mem.eql(u8, sig, "onMouseMove(_)")) return &input_onMouseMove;
-            if (std.mem.eql(u8, sig, "onTick(_)")) return &input_onTick;
-            return null;
+        if (is_static and std.mem.eql(u8, klass, "UI")) {
+            return @This().ui_map.get(sig) orelse null;
         }
 
         return null;
@@ -528,5 +550,78 @@ pub const Api = struct {
         const rt = wren_c.c.wrenGetUserData(vm) orelse return;
         const runtime: *runtime_mod.Runtime = @ptrCast(@alignCast(rt));
         runtime.registerTick(vm, 1);
+    }
+
+    fn ui_button(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const w = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const h = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const label = std.mem.span(wren_c.c.wrenGetSlotString(vm, 5));
+
+        const clicked = ui.UI.button(x, y, w, h, label);
+        wren_c.c.wrenSetSlotBool(vm, 0, clicked);
+    }
+
+    fn ui_text(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const content = std.mem.span(wren_c.c.wrenGetSlotString(vm, 3));
+
+        ui.UI.text(x, y, content);
+    }
+
+    fn ui_panel(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const w = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const h = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+
+        ui.UI.panel(x, y, w, h);
+    }
+
+    fn ui_bar(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const w = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const h = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const value = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 5)));
+        const max_value = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 6)));
+
+        ui.UI.bar(x, y, w, h, value, max_value);
+    }
+
+    fn ui_inputField(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const w = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const h = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const field_id = @as(u32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 5)));
+
+        const submitted = ui.UI.inputField(x, y, w, h, field_id);
+        wren_c.c.wrenSetSlotBool(vm, 0, submitted);
+    }
+
+    fn ui_getInputText(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const text = ui.UI.getInputText();
+        wren_c.c.wrenSetSlotBytes(vm, 0, text.ptr, text.len);
+    }
+
+    fn ui_setInputText(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const text = std.mem.span(wren_c.c.wrenGetSlotString(vm, 1));
+        ui.UI.setInputText(text);
+    }
+
+    fn ui_clearInput(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        _ = vm;
+        ui.UI.clearInput();
     }
 };

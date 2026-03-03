@@ -177,11 +177,16 @@ pub const StoryState = struct {
     }
 
     pub fn setFlag(self: *Self, name: []const u8, value: bool) void {
+        self.setFlagInternal(name, value);
+        self.emitFlagEvent(name, value);
+    }
+
+    /// Set flag without emitting an event (used by event handler to avoid infinite loop)
+    pub fn setFlagInternal(self: *Self, name: []const u8, value: bool) void {
         // Check if flag exists
         for (self.flags[0..self.flagCount]) |*flag| {
             if (flag.matches(name)) {
                 flag.value = value;
-                self.emitFlagEvent(name, value);
                 return;
             }
         }
@@ -190,7 +195,6 @@ pub const StoryState = struct {
         if (self.flagCount < MAX_FLAGS) {
             self.flags[self.flagCount] = FlagEntry.init(name, value);
             self.flagCount += 1;
-            self.emitFlagEvent(name, value);
         }
     }
 

@@ -159,6 +159,17 @@ pub const Loader = struct {
         \\  foreign static onTick(callback)
         \\}
         \\
+        \\foreign class UI {
+        \\  foreign static button(x, y, w, h, label)
+        \\  foreign static text(x, y, content)
+        \\  foreign static panel(x, y, w, h)
+        \\  foreign static bar(x, y, w, h, value, maxValue)
+        \\  foreign static inputField(x, y, w, h, id)
+        \\  foreign static getInputText()
+        \\  foreign static setInputText(text)
+        \\  foreign static clearInput()
+        \\}
+        \\
         \\class Events {
         \\  static message(text, duration) { Engine.showMessage(text, duration) }
         \\  static playSound(id, volume, loop) { Engine.playSound(id, volume, loop) }
@@ -225,5 +236,6 @@ pub const Loader = struct {
         \\  static onMouseMove(callback) { Engine.onMouseMove(callback) }
         \\  static onTick(callback) { Engine.onTick(callback) }
         \\}
+        \\    
     ;
 };

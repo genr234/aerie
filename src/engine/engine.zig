@@ -284,17 +284,28 @@ fn explorationDraw(_: *Mode, engine: *Engine) void {
 
     rl.drawText(rl.textFormat("Scene: %d", .{engine.gameState.manager.currentIndex}), 10, 10, 20, .green);
 
-    ui.drawFromEventQueue(engine.gameState.eventQueue, .{
-        .toast = .{
-            .origin = .{ .x = 10, .y = 40 },
-            .lineHeight = 24,
-            .fontSize = 20,
-            .color = .black,
-            .maxLines = 4,
-        },
-    });
-
     engine.gameState.manager.draw();
+
+    // Call Wren onDraw for custom UI
+    if (engine.wrenRuntime) |*rt| {
+        _ = rt.callOnDraw();
+    }
+
+    // Draw event messages as toasts
+    var msg_idx: usize = 0;
+    var y_offset: f32 = 40;
+    while (msg_idx < engine.gameState.eventQueue.len()) : (msg_idx += 1) {
+        const evt_ptr = engine.gameState.eventQueue.peek(msg_idx) orelse break;
+        switch (evt_ptr.*) {
+            .ShowMessage => |msg| {
+                if (msg.elapsed < msg.duration) {
+                    ui.UI.toast(msg.getText(), y_offset, msg.duration, msg.elapsed, .{ .font_size = 20, .color = .black });
+                    y_offset += 24;
+                }
+            },
+            else => {},
+        }
+    }
 }
 
 pub const VNMode = Mode{

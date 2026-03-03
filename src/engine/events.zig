@@ -74,7 +74,6 @@ pub const SetEntityActive = struct {
     }
 };
 
-
 pub const Event = union(enum) {
     ShowMessage: ShowMessage,
     StartDialogue: StartDialogue,
@@ -88,7 +87,6 @@ pub const Event = union(enum) {
         action: *const void,
     },
 };
-
 
 pub fn showMessage(text: []const u8, duration: f32) Event {
     const len = @min(text.len, MAX_MESSAGE_LEN - 1);
@@ -104,7 +102,6 @@ pub fn startDialogue(runner: *dialogue.Runner, context: ?*anyopaque) Event {
         .context = context,
     } };
 }
-
 
 pub fn startDialogueAt(runner: *dialogue.Runner, context: ?*anyopaque, label: []const u8) Event {
     const len = @min(label.len, MAX_ID_LEN - 1);
@@ -161,7 +158,6 @@ pub fn quitGame() Event {
 pub fn customEvent(action: void) Event {
     return .{ .Custom = .{ .action = &action } };
 }
-
 
 /// Callback for custom event handling (return true if consumed)
 pub const CustomEventHandler = *const fn (action: *const void) bool;
@@ -225,7 +221,6 @@ pub const EventQueue = struct {
     pub fn setOnQuit(self: *Self, handler: *const fn () void) void {
         self.systems.onQuit = handler;
     }
-
 
     pub fn push(self: *Self, event: Event) !void {
         if (self.count >= CAPACITY) {
@@ -308,7 +303,7 @@ pub const EventQueue = struct {
 
             .SetFlag => |sf| {
                 if (self.systems.storyState) |state| {
-                    state.setFlag(sf.getFlagName(), sf.value);
+                    state.setFlagInternal(sf.getFlagName(), sf.value);
                 }
                 return true;
             },

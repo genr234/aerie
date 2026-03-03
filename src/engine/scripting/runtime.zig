@@ -38,6 +38,7 @@ pub const Runtime = struct {
     game_class: ?*wren_c.c.WrenHandle = null,
     on_boot: ?*wren_c.c.WrenHandle = null,
     on_update: ?*wren_c.c.WrenHandle = null,
+    on_draw: ?*wren_c.c.WrenHandle = null,
     boot_ok: bool = false,
 
     call_0: ?*wren_c.c.WrenHandle = null,
@@ -124,6 +125,7 @@ pub const Runtime = struct {
             self.game_class = null;
             self.on_boot = null;
             self.on_update = null;
+            self.on_draw = null;
             self.call_0 = null;
             self.call_1 = null;
             self.call_2 = null;
@@ -229,6 +231,7 @@ pub const Runtime = struct {
         // Per Wren's own API tests, 0-arg methods may be "name" or "name()".
         self.on_boot = wren_c.c.wrenMakeCallHandle(vm, "onBoot()");
         self.on_update = wren_c.c.wrenMakeCallHandle(vm, "onUpdate(_)");
+        self.on_draw = wren_c.c.wrenMakeCallHandle(vm, "onDraw()");
 
         // Note: `wrenHasVariable()` requires the variable name to include the
         // full declaration prefix (e.g. "Game"), and in practice it tends to be
@@ -278,6 +281,29 @@ pub const Runtime = struct {
         const res = wren_c.c.wrenCall(vm, on_update);
         if (res != wren_c.c.WREN_RESULT_SUCCESS) {
             std.debug.print("[wren] onUpdate call failed res={d}\n", .{@as(u32, @intCast(res))});
+            if (self.last_error_len > 0) {
+                std.debug.print("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
+            }
+            // Stop further calls if we get an error.
+            self.boot_ok = false;
+        }
+        return res == wren_c.c.WREN_RESULT_SUCCESS;
+    }
+
+    pub fn callOnDraw(self: *Self) bool {
+        // Skip if boot failed or handles are missing.
+        if (!self.boot_ok) return false;
+        const vm = self.vm orelse return false;
+        const game_class = self.game_class orelse return false;
+        const on_draw = self.on_draw orelse return false;
+
+        wren_c.c.wrenEnsureSlots(vm, 1);
+        wren_c.c.wrenSetSlotHandle(vm, 0, game_class);
+        self.last_error_len = 0;
+
+        const res = wren_c.c.wrenCall(vm, on_draw);
+        if (res != wren_c.c.WREN_RESULT_SUCCESS) {
+            std.debug.print("[wren] onDraw call failed res={d}\n", .{@as(u32, @intCast(res))});
             if (self.last_error_len > 0) {
                 std.debug.print("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
             }

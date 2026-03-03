@@ -333,11 +333,11 @@ pub const Builder = struct {
         _ = eb.withTag(tag)
             .withTransform(.{ .x = 0, .y = 0 })
             .withCameraFull(.{
-            .offset = cam.offset,
-            .target = cam.target,
-            .rotation = cam.rotation,
-            .zoom = cam.zoom,
-        })
+                .offset = cam.offset,
+                .target = cam.target,
+                .rotation = cam.rotation,
+                .zoom = cam.zoom,
+            })
             .build();
         return self;
     }

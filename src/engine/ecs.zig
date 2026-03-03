@@ -1,7 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
 const dialogue = @import("dialogue.zig");
-const sprites = @import("sprites.zig");
 const events = @import("events.zig");
 const root = @import("../root.zig");
 const state = @import("state.zig");
@@ -484,25 +483,19 @@ pub const World = struct {
     }
 
     pub fn clear(self: *Self) void {
-        self.tags.clear();
-        self.transforms.clear();
-        self.sprite_renderers.clear();
-        self.circle_renderers.clear();
-        self.rect_renderers.clear();
-        self.player_controllers.clear();
-        self.cameras.clear();
-        self.triggers.clear();
-        self.box_colliders.clear();
-        self.actives.clear();
-
-        for (0..self.max_entities) |i| {
-            if (self.entity_alive.items[i]) {
-                self.entity_generations.items[i] += 1;
+        inline for (std.meta.fields(Self)) |field| {
+            const FieldType = field.type;
+            if (@hasDecl(FieldType, "clear")) {
+                @field(self, field.name).clear();
             }
-            self.entity_alive.items[i] = false;
         }
 
-        self.free_list.items.len = 0;
+        for (self.entity_alive.items, self.entity_generations.items) |*alive, *gen| {
+            if (alive.*) gen.* +%= 1;
+            alive.* = false;
+        }
+
+        self.free_list.clearRetainingCapacity();
         self.entity_count = 0;
     }
 };
