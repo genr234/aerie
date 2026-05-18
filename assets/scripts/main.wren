@@ -1,72 +1,113 @@
-// Simple Bitsy-like game example
-// Use Engine state for persistence, or just track in closures for simple games
-
-import "engine/api" for Engine, UI
+import "engine/api" for UI
+import "engine/core/state" for State
+import "engine/core/scene" for Scene
+import "engine/core/script" for Script
+import "engine/core/signal" for Signal
+import "engine/core/module" for Module
+import "engine/core/genome" for Genome
+import "engine/core/entity" for Entity
+import "engine/modules/save" for SaveModule
+import "engine/modules/vn" for VNModule
+import "engine/modules/rpg" for RpgModule
+import "engine/schemas/base" for BaseSchemas
+import "engine/genomes/base" for BaseGenomes
+import "engine/scenes/demo" for DemoScenes
 
 class Game {
   static onBoot() {
-    // Initialize state in Engine (persists across scene changes)
-    Engine.setInt("score", 0)
-    Engine.setInt("health", 100)
-    
-    Engine.showMessage("Welcome to the Game!", 2.0)
-    
-    Engine.onKeyPressed("space") {
-      Engine.addInt("score", 10)
-      Engine.showMessage("+10 points!", 1.0)
-    }
-    
-    Engine.onKeyPressed("r") {
-      Engine.setInt("score", 0)
-      Engine.setInt("health", 100)
-      Engine.showMessage("Reset!", 1.0)
+    BaseSchemas.install()
+    BaseGenomes.install()
+    DemoScenes.install()
+
+    SaveModule.configure({ "autosave": true, "slots": 2 })
+    VNModule.configure(null)
+    RpgModule.configure(null)
+
+    State.defineModel("player", {
+      "name": { "type": "string", "default": "Explorer" },
+      "hp": { "type": "number", "default": 80 },
+      "gold": { "type": "number", "default": 5 }
+    })
+    State.defineRecordType("combat_round", { "turn": 0, "actor": null, "target": null })
+
+    Module.register("GameModule", { "requires": ["SaveModule"], "config": { "difficulty": "easy" } })
+    Module.requires("GameModule", [])
+
+    Script.spawn("main", Fn.new { Game.engineLoop() })
+
+    State.transaction("boot", Fn.new {|state|
+      State.set("scene.current", "intro")
+      State.set("runtime.saveCount", 0)
+      return state
+    })
+
+    Script.emit("scene.initialized", { "scene": State.get("scene.current") })
+  }
+
+  static engineLoop() {
+    Script.checkpoint("booted")
+
+    while (true) {
+      State.update("runtime.tick", Fn.new {|value|
+        if (value == null) return 1
+        return value + 1
+      })
+
+      var actor = Genome.instantiate("Player")
+      Entity.addComponent(actor, "NarrativeActor", { "mood": "curious" })
+
+      var line = State.get("story.lastChoice")
+      if (line == null) {
+        State.set("story.lastChoice", "none")
+      }
+
+      Script.emit("frame.tick", { "tick": State.get("runtime.tick") })
+
+      if (State.get("runtime.tick") % 10 == 0) {
+        SaveModule.save()
+        State.update("runtime.saveCount", Fn.new {|value|
+          if (value == null) return 1
+          return value + 1
+        })
+        Script.emit("game.saved", { "slot": State.get("runtime.saveCount") })
+      }
+
+      Fiber.yield()
     }
   }
 
-  static onUpdate(dt) {
-    // Game logic here
-  }
-  
+  static onUpdate(dt) {}
+
   static onDraw() {
-    // HUD panel
-    UI.panel(10, 10, 200, 100)
-    
-    // Score text
-    UI.text(20, 20, "Score: %(Engine.getInt("score"))")
-    
-    // Health bar
-    UI.text(20, 45, "Health:")
-    UI.bar(20, 65, 180, 15, Engine.getInt("health"), 100)
-    
-    // Interactive button
-    if (UI.button(10, 120, 100, 35, "Click Me!")) {
-      Engine.addInt("score", 1)
-      Engine.showMessage("+1 point!", 0.5)
+    var currentScene = State.get("scene.current")
+    var frame = State.get("runtime.tick")
+    var gold = State.get("models.player.gold")
+    var message = "Gold: %(gold)"
+
+    drawPanel("Scene: %(currentScene)", 32, 32)
+    drawPanel("Frame: %(frame)", 32, 72)
+    drawPanel("Gold: %(gold)", 32, 112)
+    drawPanel("Message: %(message)", 32, 152)
+
+    if (UI.button(32, 200, 220, 40, "Advance Scene")) {
+      var next = currentScene == "intro" ? "camp" : "intro"
+      Scene.transition(next, "idle")
+      State.set("scene.current", next)
+      Script.emit("scene.changed", { "scene": next })
     }
-    
-    // Reset button
-    if (UI.button(120, 120, 100, 35, "Reset")) {
-      Engine.setInt("score", 0)
-      Engine.setInt("health", 100)
+
+    if (UI.button(280, 200, 220, 40, "Spend 2 Gold")) {
+      State.update("models.player.gold", Fn.new {|value|
+        var current = value
+        if (current == null) current = 0
+        return current - 2
+      })
+      Script.emit("gold.changed", { "gold": State.get("models.player.gold") })
     }
-    
-    // Text input field
-    UI.text(10, 170, "Enter name:")
-    if (UI.inputField(100, 165, 150, 30, 1)) {
-      var name = UI.getInputText()
-      Engine.setString("playerName", name)
-      Engine.showMessage("Hello, %(name)!", 2.0)
-      UI.clearInput()
-    }
-    
-    // Show current name if set
-    var currentName = Engine.getString("playerName")
-    if (currentName != "") {
-      UI.text(260, 170, "Player: %(currentName)")
-    }
-    
-    // Instructions
-    UI.text(10, 210, "Press SPACE for +10 pts")
-    UI.text(10, 230, "Press R to reset")
+  }
+
+  static drawPanel(text, x, y) {
+    UI.panel(x, y, 460, 34)
+    UI.text(x + 8, y + 8, text)
   }
 }
