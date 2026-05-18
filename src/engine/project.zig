@@ -93,6 +93,24 @@ pub fn loadProjectBundleFromFs(allocator: std.mem.Allocator, project_root: []con
     fs_provider.* = .{ .root = try dupString(allocator, project_root) };
     const provider = fs_provider.provider();
 
+    const scripts = try loadScriptModulesFromFs(allocator, project_root);
+    return loadProjectBundleFromProviderWithScripts(allocator, provider, project_root, scripts);
+}
+
+pub fn loadProjectBundleFromProvider(
+    allocator: std.mem.Allocator,
+    provider: resources.ResourceProvider,
+    asset_root: []const u8,
+) !ProjectBundle {
+    return loadProjectBundleFromProviderWithScripts(allocator, provider, asset_root, &.{});
+}
+
+fn loadProjectBundleFromProviderWithScripts(
+    allocator: std.mem.Allocator,
+    provider: resources.ResourceProvider,
+    asset_root: []const u8,
+    scripts: []ScriptModule,
+) !ProjectBundle {
     const config_text = provider.readText(allocator, "game.json") catch return ProjectError.MissingField;
     defer allocator.free(config_text);
     const cfg = try parseProjectConfigJson(allocator, config_text);
@@ -107,14 +125,12 @@ pub fn loadProjectBundleFromFs(allocator: std.mem.Allocator, project_root: []con
         break :blk out;
     };
 
-    const scripts = try loadScriptModulesFromFs(allocator, project_root);
-
     return .{
         .config = cfg,
         .scenes = scenes,
         .scripts = scripts,
         .resources = provider,
-        .asset_root = try dupString(allocator, project_root),
+        .asset_root = try dupString(allocator, asset_root),
     };
 }
 
@@ -381,4 +397,35 @@ test "project bundle does not fall back when start scene is unresolved" {
     };
 
     try std.testing.expect(bundle.startScene() == null);
+}
+
+test "project bundle loads from memory resource provider" {
+    const entries = [_]resources.MemoryResource{
+        .{
+            .path = "game.json",
+            .bytes =
+            \\{
+            \\  "id": "memory-reference",
+            \\  "title": "Memory Reference",
+            \\  "start_scene": "crossroads",
+            \\  "scenes": [
+            \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" }
+            \\  ]
+            \\}
+            ,
+        },
+        .{
+            .path = "assets/reference-game/crossroads.json",
+            .bytes = "{\"entities\":[]}",
+        },
+    };
+    var provider_state = resources.MemoryResourceProvider{ .entries = &entries };
+
+    const bundle = try loadProjectBundleFromProvider(std.testing.allocator, provider_state.provider(), "memory://reference");
+
+    try std.testing.expectEqualStrings("memory-reference", bundle.config.id);
+    try std.testing.expectEqual(@as(usize, 1), bundle.scenes.len);
+    try std.testing.expectEqualStrings("crossroads", bundle.scenes[0].name);
+    try std.testing.expectEqualStrings("{\"entities\":[]}", bundle.scenes[0].json);
+    try std.testing.expectEqualStrings("memory://reference", bundle.asset_root);
 }
