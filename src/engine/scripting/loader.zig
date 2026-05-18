@@ -1,14 +1,23 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assets = @import("../utils/assets.zig");
+const project = @import("../project.zig");
+const resources = @import("../resources.zig");
 const wren_c = @import("wren_c.zig");
 
 pub const Loader = struct {
     allocator: std.mem.Allocator,
     project_root: []const u8,
+    modules: []const project.ScriptModule = &.{},
+    resources: ?resources.ResourceProvider = null,
 
-    pub fn init(allocator: std.mem.Allocator, project_root: []const u8) Loader {
-        return .{ .allocator = allocator, .project_root = project_root };
+    pub fn init(
+        allocator: std.mem.Allocator,
+        project_root: []const u8,
+        modules: []const project.ScriptModule,
+        resource_provider: ?resources.ResourceProvider,
+    ) Loader {
+        return .{ .allocator = allocator, .project_root = project_root, .modules = modules, .resources = resource_provider };
     }
 
     pub fn deinit(self: *Loader) void {
@@ -23,6 +32,44 @@ pub const Loader = struct {
         const rel = try std.fmt.allocPrint(self.allocator, "scripts/{s}.wren", .{name});
         defer self.allocator.free(rel);
         return assets.parseAssetPath(self.allocator, self.project_root, rel, builtin.os.tag);
+    }
+
+    pub fn findModuleSource(self: *const Loader, name: []const u8) ?[]const u8 {
+        for (self.modules) |module| {
+            if (std.mem.eql(u8, module.name, name)) return module.source;
+        }
+        return null;
+    }
+
+    pub fn loadOwnedModuleSource(self: *Loader, name: []const u8) ![]const u8 {
+        if (self.findModuleSource(name)) |source| {
+            return self.allocator.dupe(u8, source);
+        }
+
+        const rel = try std.fmt.allocPrint(self.allocator, "scripts/{s}.wren", .{name});
+        defer self.allocator.free(rel);
+
+        if (self.resources) |provider| {
+            const path = try std.fmt.allocPrint(self.allocator, "assets/{s}", .{rel});
+            defer self.allocator.free(path);
+            return provider.readText(self.allocator, path);
+        }
+
+        const asset_path = try assets.resolveAssetPath(self.allocator, self.project_root, rel, builtin.os.tag);
+        defer self.allocator.free(asset_path);
+
+        const io = std.Io.Threaded.global_single_threaded.io();
+        var file = std.Io.Dir.cwd().openFile(io, asset_path, .{}) catch |err| {
+            std.debug.print("[wren] failed to open {s}: {any}\n", .{ asset_path, err });
+            return error.WrenLoadFailed;
+        };
+        defer file.close(io);
+
+        var reader = file.reader(io, &.{});
+        return reader.interface.allocRemaining(self.allocator, .limited(1 << 20)) catch |err| switch (err) {
+            error.ReadFailed => return reader.err.?,
+            else => |e| return e,
+        };
     }
 
     pub fn loadModule(
@@ -42,23 +89,42 @@ pub const Loader = struct {
             return loadEngineApiModule();
         }
 
+        if (self.findModuleSource(mod_name)) |source| {
+            return copySourceForWren(source);
+        }
+
+        if (self.resources) |provider| {
+            const path = std.fmt.allocPrint(self.allocator, "assets/scripts/{s}.wren", .{mod_name}) catch {
+                return .{ .source = null, .onComplete = null, .userData = null };
+            };
+            defer self.allocator.free(path);
+
+            const source = provider.readText(self.allocator, path) catch {
+                return .{ .source = null, .onComplete = null, .userData = null };
+            };
+            defer self.allocator.free(source);
+
+            return copySourceForWren(source);
+        }
+
         const asset_path = self.moduleNameToAssetPath(name) catch {
             return .{ .source = null, .onComplete = null, .userData = null };
         };
         std.debug.print("[wren]   -> '{s}'\n", .{asset_path});
 
-        const cwd = std.fs.cwd();
-        const file = cwd.openFileZ(asset_path, .{}) catch {
+        const io = std.Io.Threaded.global_single_threaded.io();
+        var file = std.Io.Dir.cwd().openFile(io, asset_path, .{}) catch {
             self.allocator.free(asset_path);
             return .{ .source = null, .onComplete = null, .userData = null };
         };
-        defer file.close();
+        defer file.close(io);
 
         // Allocate module source using the C allocator so `onComplete` can free
         // it reliably (Wren doesn't pass a Loader instance back).
         // Wren expects a null-terminated C string whose lifetime extends until
         // `onComplete` is called.
-        const src = file.readToEndAlloc(std.heap.c_allocator, 1 << 20) catch {
+        var reader = file.reader(io, &.{});
+        const src = reader.interface.allocRemaining(std.heap.c_allocator, .limited(1 << 20)) catch {
             self.allocator.free(asset_path);
             return .{ .source = null, .onComplete = null, .userData = null };
         };
@@ -69,6 +135,19 @@ pub const Loader = struct {
             return .{ .source = null, .onComplete = null, .userData = null };
         };
         @memcpy(zsrc[0..src.len], src);
+
+        return .{
+            .source = @ptrCast(zsrc.ptr),
+            .onComplete = &onModuleSourceFree,
+            .userData = zsrc.ptr,
+        };
+    }
+
+    fn copySourceForWren(source: []const u8) wren_c.c.WrenLoadModuleResult {
+        const zsrc = std.heap.c_allocator.allocSentinel(u8, source.len, 0) catch {
+            return .{ .source = null, .onComplete = null, .userData = null };
+        };
+        @memcpy(zsrc[0..source.len], source);
 
         return .{
             .source = @ptrCast(zsrc.ptr),
@@ -178,6 +257,21 @@ pub const Loader = struct {
         \\}
         \\
         \\class State {
+        \\  static set(name, value) {
+        \\    if (value is Bool) return Engine.setFlag(name, value)
+        \\    if (value is Num) return Engine.setFloat(name, value)
+        \\    if (value is String) return Engine.setString(name, value)
+        \\  }
+        \\
+        \\  static get(name) {
+        \\    if (Engine.hasFlag(name)) return Engine.getFlag(name)
+        \\    var text = Engine.getString(name)
+        \\    if (text != "") return text
+        \\    return Engine.getFloat(name)
+        \\  }
+        \\
+        \\  static update(name, callback) { State.set(name, callback.call(State.get(name))) }
+        \\
         \\  static setFlag(name, value) { Engine.setFlag(name, value) }
         \\  static getFlag(name) { Engine.getFlag(name) }
         \\  static toggleFlag(name) { Engine.toggleFlag(name) }

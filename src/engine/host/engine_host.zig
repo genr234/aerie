@@ -22,10 +22,8 @@ pub const EngineHost = struct {
         mem.init();
         self.project_root = project_root;
 
-        const project_cfg = project.loadProjectConfig(mem.permanent(), project_root) catch project.ProjectConfig{
-            .id = "game",
-            .title = "Game",
-        };
+        const bundle = try project.loadProjectBundleFromFs(mem.permanent(), project_root);
+        const project_cfg = bundle.config;
 
         const ztitle = try std.fmt.allocPrint(mem.frame(), "{s}", .{project_cfg.window_title});
         ztitle.ptr[ztitle.len] = 0;
@@ -35,7 +33,9 @@ pub const EngineHost = struct {
         self.wren_runtime = scripting_runtime.Runtime.init(
             mem.permanent(),
             &self.script_ctx,
-            project_root,
+            bundle.asset_root,
+            bundle.scripts,
+            bundle.resources,
             project_cfg.entry_module,
             project_cfg.entry_class,
         ) catch |err| blk: {

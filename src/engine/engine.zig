@@ -10,6 +10,7 @@ const ecs = @import("ecs.zig");
 const story = @import("story.zig");
 const events = @import("events.zig");
 const assets = @import("utils/assets.zig");
+const resources = @import("resources.zig");
 const ui = @import("ui.zig");
 const state = @import("state.zig");
 const vn = @import("vn.zig");
@@ -19,6 +20,7 @@ const scripting_context = @import("scripting/context.zig");
 
 const sceneio_json = @import("sceneio/json.zig");
 const sceneio_instantiate = @import("sceneio/instantiate.zig");
+const sceneio_types = @import("sceneio/types.zig");
 
 pub const screenWidth = 800;
 pub const screenHeight = 450;
@@ -32,6 +34,7 @@ pub const Engine = struct {
 
     scriptCtx: scripting_context.ScriptingContext = undefined,
     wrenRuntime: ?scripting.Runtime = null,
+    textureEntries: []sceneio_instantiate.TextureTable.Entry = &.{},
 
     project_root: []const u8 = ".",
 
@@ -41,23 +44,24 @@ pub const Engine = struct {
 
     pub fn init(self: *Self, project_root: []const u8) !void {
         mem.init();
-        self.project_root = project_root;
+        errdefer mem.deinit();
 
-        const project_cfg = project.loadProjectConfig(mem.permanent(), project_root) catch project.ProjectConfig{
-            .id = "demo",
-            .title = "Test Game",
-        };
+        const bundle = try project.loadProjectBundleFromFs(mem.permanent(), project_root);
+        try self.initBundle(&bundle);
+    }
+
+    pub fn initBundle(self: *Self, bundle: *const project.ProjectBundle) !void {
+        if (!mem.isInitialized()) {
+            mem.init();
+        }
+
+        self.project_root = bundle.asset_root;
+        const project_cfg = bundle.config;
 
         const ztitle = try std.fmt.allocPrint(mem.frame(), "{s}", .{project_cfg.window_title});
         ztitle.ptr[ztitle.len] = 0;
         rl.initWindow(project_cfg.window_width, project_cfg.window_height, @ptrCast(ztitle.ptr[0..ztitle.len :0]));
         rl.setTargetFPS(60);
-
-        const player_path = try assets.parseAssetPath(mem.frame(), project_root, "player.png", builtin.os.tag);
-        self.gameState.playerTexture = rl.loadTexture(player_path) catch |err| {
-            std.debug.print("Failed to load texture: {s}\n", .{player_path});
-            return err;
-        };
 
         // Systems
         self.gameState.eventQueue = events.EventQueue.init();
@@ -83,7 +87,8 @@ pub const Engine = struct {
         self.gameState.manager = undefined;
         self.gameState.sceneBuilder = undefined;
 
-        self.sceneManager = try scenes.SceneManager.init(10, &self.gameState);
+        const scene_count = @max(bundle.scenes.len, 1);
+        self.sceneManager = try scenes.SceneManager.init(scene_count, &self.gameState);
         self.sceneManager.setOnTransition(onSceneTransition);
         self.sceneBuilder = try scenes.Builder.init(mem.permanent(), screenWidth, screenHeight, &self.gameState);
 
@@ -95,19 +100,39 @@ pub const Engine = struct {
             .storyState = &self.gameState.storyState,
         });
 
-        var scene0 = try scenes.Scene.initForScene(project_cfg.window_width, project_cfg.window_height, &self.gameState);
-        const scene_path = try assets.resolveAssetPath(mem.frame(), project_root, project_cfg.start_scene, builtin.os.tag);
-        defer mem.frame().free(scene_path);
-        const ir = try sceneio_json.loadSceneIR(mem.frame(), scene_path);
+        const scene_irs = try mem.permanent().alloc(sceneio_types.SceneIR, bundle.scenes.len);
+        for (bundle.scenes, 0..) |scene_source, i| {
+            scene_irs[i] = sceneio_json.parseSceneIR(mem.permanent(), scene_source.json) catch |err| {
+                std.debug.print("Failed to parse scene '{s}': {any}\n", .{ scene_source.name, err });
+                return err;
+            };
+        }
 
-        const textures = sceneio_instantiate.TextureTable{ .player = self.gameState.playerTexture };
+        self.textureEntries = try loadSceneTextures(bundle, scene_irs);
+        const textures = sceneio_instantiate.TextureTable{ .entries = self.textureEntries };
+        if (self.textureEntries.len == 0) return error.MissingTexture;
+        self.gameState.playerTexture = if (textures.get("player.png")) |tex| tex else self.textureEntries[0].texture;
+
         const dialogue_bindings = sceneio_instantiate.DialogueBindings{
             .game = @ptrCast(&self.gameState.gameDialogue),
             .vn = @ptrCast(&self.gameState.vnDialogue),
         };
 
-        try sceneio_instantiate.instantiateSceneIR(mem.frame(), &scene0, &ir, &textures, dialogue_bindings);
-        self.gameState.manager.scenes[0] = scene0;
+        for (bundle.scenes, scene_irs, 0..) |scene_source, *ir, i| {
+            var scene = switch (ir.scene_type) {
+                .exploration => try scenes.Scene.initForScene(ir.width, ir.height, &self.gameState),
+                .visual_novel => try scenes.Scene.initVNForScene(ir.width, ir.height, &self.gameState),
+            };
+            scene.name = scene_source.name;
+            sceneio_instantiate.instantiateSceneIR(mem.frame(), &scene, ir, &textures, dialogue_bindings) catch |err| {
+                std.debug.print("Failed to instantiate scene '{s}': {any}\n", .{ scene_source.name, err });
+                return err;
+            };
+            self.gameState.manager.scenes[i] = scene;
+        }
+
+        const start_scene = bundle.startScene() orelse return error.MissingStartScene;
+        self.gameState.manager.currentIndex = self.gameState.manager.findSceneByName(start_scene.name) orelse 0;
 
         self.scriptCtx = .{
             .eventQueue = &self.gameState.eventQueue,
@@ -117,7 +142,7 @@ pub const Engine = struct {
             .vnDialogue = &self.gameState.vnDialogue,
             .vnActive = &self.gameState.vnActive,
         };
-        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, project_root, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
+        self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, bundle.asset_root, bundle.scripts, bundle.resources, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
             std.debug.print("[wren] runtime init failed: {any}\n", .{err});
             break :blk null;
         };
@@ -143,7 +168,10 @@ pub const Engine = struct {
         self.gameState.vnScript.deinit();
         self.gameState.eventQueue.deinit();
 
-        rl.unloadTexture(self.gameState.playerTexture);
+        for (self.textureEntries) |entry| {
+            rl.unloadTexture(entry.texture);
+        }
+        self.textureEntries = &.{};
         rl.closeWindow();
 
         mem.deinit();
@@ -193,6 +221,81 @@ pub const Engine = struct {
         rl.endDrawing();
     }
 };
+
+fn loadTexture(bundle: *const project.ProjectBundle, path: []const u8) !rl.Texture2D {
+    if (bundle.resources) |provider| {
+        const bytes = try readAssetBytes(provider, mem.frame(), path);
+        defer mem.frame().free(bytes);
+
+        const ext = try imageFileType(mem.frame(), path);
+        defer mem.frame().free(ext);
+
+        var image = try rl.loadImageFromMemory(ext, bytes);
+        defer image.unload();
+
+        return rl.Texture.fromImage(image);
+    }
+
+    const player_path = try assets.parseAssetPath(mem.frame(), bundle.asset_root, path, builtin.os.tag);
+    return rl.loadTexture(player_path) catch |err| {
+        std.debug.print("Failed to load texture: {s}\n", .{player_path});
+        return err;
+    };
+}
+
+fn loadSceneTextures(bundle: *const project.ProjectBundle, scene_irs: []const sceneio_types.SceneIR) ![]sceneio_instantiate.TextureTable.Entry {
+    var paths = std.ArrayList([]const u8).empty;
+    defer paths.deinit(mem.frame());
+
+    for (scene_irs) |ir| {
+        for (ir.entities) |entity| {
+            for (entity.components) |component| {
+                switch (component) {
+                    .Sprite => |sprite| try appendUniquePath(&paths, sprite.texture),
+                    else => {},
+                }
+            }
+        }
+    }
+
+    const entries = try mem.permanent().alloc(sceneio_instantiate.TextureTable.Entry, paths.items.len);
+    for (paths.items, 0..) |path, i| {
+        entries[i] = .{
+            .name = try mem.permanent().dupe(u8, path),
+            .texture = loadTexture(bundle, path) catch |err| {
+                std.debug.print("Failed to load texture asset '{s}': {any}\n", .{ path, err });
+                return err;
+            },
+        };
+    }
+
+    return entries;
+}
+
+fn appendUniquePath(paths: *std.ArrayList([]const u8), path: []const u8) !void {
+    for (paths.items) |existing| {
+        if (std.mem.eql(u8, existing, path)) return;
+    }
+    try paths.append(mem.frame(), path);
+}
+
+fn readAssetBytes(provider: resources.ResourceProvider, allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    const asset_path = if (std.mem.startsWith(u8, path, "assets/") or std.mem.startsWith(u8, path, "/assets/"))
+        path
+    else
+        try std.fmt.allocPrint(allocator, "assets/{s}", .{path});
+
+    const should_free = asset_path.ptr != path.ptr;
+    defer if (should_free) allocator.free(asset_path);
+
+    return provider.readBytes(allocator, asset_path);
+}
+
+fn imageFileType(allocator: std.mem.Allocator, path: []const u8) ![:0]const u8 {
+    const ext = std.fs.path.extension(path);
+    if (ext.len == 0) return allocator.dupeZ(u8, ".png");
+    return allocator.dupeZ(u8, ext);
+}
 
 fn onSceneTransition(scene: *scenes.Scene, manager: *scenes.SceneManager, toSceneIndex: usize) bool {
     _ = scene;
@@ -281,8 +384,6 @@ fn explorationDraw(_: *Mode, engine: *Engine) void {
         .height = 100,
     };
     dialogue.draw(&engine.gameState.gameDialogue, dialogueBounds, .{});
-
-    rl.drawText(rl.textFormat("Scene: %d", .{engine.gameState.manager.currentIndex}), 10, 10, 20, .green);
 
     engine.gameState.manager.draw();
 

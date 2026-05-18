@@ -1,0 +1,53 @@
+{
+  "name": "crossroads",
+  "type": "exploration",
+  "size": { "width": 800, "height": 450 },
+  "entities": [
+    {
+      "tag": "main_camera",
+      "components": {
+        "Transform": { "position": [0, 0] },
+        "Camera": { "offset": [400, 225], "zoom": 1.0, "followTag": "player" }
+      }
+    },
+    {
+      "tag": "player",
+      "components": {
+        "Transform": { "position": [96, 208] },
+        "Sprite": { "texture": "reference-game/player.png" },
+        "PlayerController": { "speed": 115 }
+      }
+    },
+    {
+      "tag": "path",
+      "components": {
+        "Transform": { "position": [0, 260] },
+        "Rect": { "width": 800, "height": 74, "color": "#d9d0a3" }
+      }
+    },
+    {
+      "tag": "stone",
+      "components": {
+        "Transform": { "position": [548, 205] },
+        "Rect": { "width": 70, "height": 64, "color": "#7a7f87" }
+      }
+    },
+    {
+      "tag": "stone_glow",
+      "components": {
+        "Transform": { "position": [582, 200] },
+        "Circle": { "radius": 8, "color": "#f7d96b" }
+      }
+    },
+    {
+      "tag": "stone_trigger",
+      "components": {
+        "Trigger": {
+          "bounds": [520, 180, 130, 120],
+          "oneShot": true,
+          "action": { "setFlag": { "name": "stone_touched", "value": true } }
+        }
+      }
+    }
+  ]
+}

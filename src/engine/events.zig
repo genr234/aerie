@@ -295,7 +295,9 @@ pub const EventQueue = struct {
                     if (cs.useIndex) {
                         mgr.changeScene(cs.sceneIndex) catch {};
                     } else if (cs.getSceneName()) |name| {
-                        mgr.changeSceneByName(name) catch {};
+                        mgr.changeSceneByName(name) catch |err| {
+                            std.debug.print("Scene transition failed for '{s}': {any}\n", .{ name, err });
+                        };
                     }
                 }
                 return true;

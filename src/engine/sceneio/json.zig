@@ -11,10 +11,12 @@ pub const JsonError = error{
 };
 
 pub fn loadSceneIR(allocator: std.mem.Allocator, path: []const u8) !types.SceneIR {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const io = std.Io.Threaded.global_single_threaded.io();
+    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
 
-    const text = try file.readToEndAlloc(allocator, 1 << 20);
+    var reader = file.reader(io, &.{});
+    const text = try reader.interface.allocRemaining(allocator, .limited(1 << 20));
     defer allocator.free(text);
 
     return parseSceneIR(allocator, text);
@@ -332,4 +334,54 @@ fn dupString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
     const buf = try allocator.alloc(u8, s.len);
     @memcpy(buf, s);
     return buf;
+}
+
+test "scene parser accepts reference crossroads scene" {
+    const text = @embedFile("../../../assets/reference-game/crossroads.json");
+    const ir = try parseSceneIR(std.testing.allocator, text);
+    try std.testing.expectEqualStrings("crossroads", ir.name);
+    try std.testing.expectEqual(@as(usize, 6), ir.entities.len);
+
+    var found_sprite = false;
+    var found_trigger = false;
+    for (ir.entities) |entity| {
+        for (entity.components) |component| {
+            switch (component) {
+                .Sprite => |sprite| {
+                    found_sprite = true;
+                    try std.testing.expectEqualStrings("reference-game/player.png", sprite.texture);
+                },
+                .Trigger => |trigger| {
+                    found_trigger = true;
+                    try std.testing.expect(std.meta.activeTag(trigger.action) == .SetFlag);
+                    try std.testing.expectEqualStrings("stone_touched", trigger.action.SetFlag.name);
+                },
+                else => {},
+            }
+        }
+    }
+
+    try std.testing.expect(found_sprite);
+    try std.testing.expect(found_trigger);
+}
+
+test "scene parser accepts reference clearing scene" {
+    const text = @embedFile("../../../assets/reference-game/clearing.json");
+    const ir = try parseSceneIR(std.testing.allocator, text);
+    try std.testing.expectEqualStrings("clearing", ir.name);
+    try std.testing.expectEqual(@as(i32, 800), ir.width);
+    try std.testing.expectEqual(@as(i32, 450), ir.height);
+}
+
+test "scene parser rejects unknown component" {
+    const text =
+        \\{
+        \\  "name": "bad",
+        \\  "entities": [
+        \\    { "tag": "thing", "components": { "Missing": {} } }
+        \\  ]
+        \\}
+    ;
+
+    try std.testing.expectError(JsonError.InvalidValue, parseSceneIR(std.testing.allocator, text));
 }

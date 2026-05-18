@@ -108,6 +108,7 @@ pub const SceneConfig = struct {
 };
 
 pub const Scene = struct {
+    name: []const u8 = "",
     width: i32 = 800,
     height: i32 = 450,
 
@@ -156,7 +157,7 @@ pub const Scene = struct {
             .height = height,
             .scene_type = .visual_novel,
             .vnState = vn.VNState.init(width, height),
-            .world = try ecs.World.init(allocator, ecs.MAX_ENTITIES, game_state),
+            .world = try ecs.World.init(allocator, 1024, game_state),
             .world_initialized = true,
         };
         return scene;
@@ -515,23 +516,19 @@ pub const SceneManager = struct {
         self.startTransition(index);
     }
 
-    /// Change scene by looking up a scene with a matching tag.
-    /// Searches for an entity with the given tag in each scene's world.
+    /// Change scene by declared scene name.
     pub fn changeSceneByName(self: *SceneManager, name: []const u8) !void {
-        for (self.scenes[0..self.capacity], 0..) |*scene, i| {
-            // Look for a scene marker entity with this name as tag
-            if (scene.world.findByTag(name) != null) {
-                try self.changeScene(i);
-                return;
-            }
+        if (self.findSceneByName(name)) |index| {
+            try self.changeScene(index);
+            return;
         }
-        // Scene not found - could log or return error
+        return error.UnknownScene;
     }
 
-    /// Find scene index by name (tag lookup)
+    /// Find scene index by declared scene name.
     pub fn findSceneByName(self: *SceneManager, name: []const u8) ?usize {
         for (self.scenes[0..self.capacity], 0..) |*scene, i| {
-            if (scene.world.findByTag(name) != null) {
+            if (std.mem.eql(u8, scene.name, name)) {
                 return i;
             }
         }
@@ -688,3 +685,17 @@ pub const SceneManager = struct {
         }
     }
 };
+
+test "scene manager resolves declared scene names" {
+    mem.init();
+    defer mem.deinit();
+
+    var game_state: state.GameState = undefined;
+    var manager = try SceneManager.init(2, &game_state);
+    manager.scenes[0].name = "crossroads";
+    manager.scenes[1].name = "clearing";
+
+    try std.testing.expectEqual(@as(?usize, 0), manager.findSceneByName("crossroads"));
+    try std.testing.expectEqual(@as(?usize, 1), manager.findSceneByName("clearing"));
+    try std.testing.expectEqual(@as(?usize, null), manager.findSceneByName("missing"));
+}

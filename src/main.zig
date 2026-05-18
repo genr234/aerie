@@ -12,13 +12,11 @@ fn gameLoop() callconv(.c) void {
     engine.draw();
 }
 
-pub fn main() !void {
+pub fn main(init_ctx: std.process.Init) !void {
     var project_root: []const u8 = ".";
 
     if (builtin.os.tag != .emscripten) {
-        const allocator = std.heap.page_allocator;
-        const args = try std.process.argsAlloc(allocator);
-        defer std.process.argsFree(allocator, args);
+        const args = try init_ctx.minimal.args.toSlice(init_ctx.arena.allocator());
 
         if (args.len > 1) {
             project_root = args[1];

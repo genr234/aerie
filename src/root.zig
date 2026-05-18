@@ -10,6 +10,8 @@ pub const events = @import("engine/events.zig");
 pub const story = @import("engine/story.zig");
 pub const vn = @import("engine/vn.zig");
 pub const audio = @import("engine/audio.zig");
+pub const project = @import("engine/project.zig");
+pub const resources = @import("engine/resources.zig");
 pub const engine = @import("engine/engine.zig");
 pub const scripting = @import("engine/scripting/runtime.zig");
 

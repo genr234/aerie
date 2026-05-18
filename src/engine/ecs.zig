@@ -106,6 +106,9 @@ pub const TriggerAction = union(enum) {
     },
     change_scene: struct {
         index: usize,
+        name: [events.MAX_ID_LEN]u8 = [_]u8{0} ** events.MAX_ID_LEN,
+        name_len: usize = 0,
+        use_index: bool = true,
     },
     set_flag: struct {
         name: [events.MAX_ID_LEN]u8,
@@ -182,11 +185,11 @@ pub fn ComponentStorage(comptime T: type) type {
         const Self = @This();
 
         /// sparse maps entity_id -> dense index
-        sparse: std.array_list.Aligned(?u32, null) = .{},
-        generations: std.array_list.Aligned(u16, null) = .{},
+        sparse: std.array_list.Aligned(?u32, null) = .empty,
+        generations: std.array_list.Aligned(u16, null) = .empty,
 
-        dense_entities: std.array_list.Aligned(u32, null) = .{},
-        dense_data: std.array_list.Aligned(T, null) = .{},
+        dense_entities: std.array_list.Aligned(u32, null) = .empty,
+        dense_data: std.array_list.Aligned(T, null) = .empty,
 
         pub fn init(self: *Self, allocator: std.mem.Allocator, initial_capacity: usize) !void {
             try self.ensureEntityCapacity(allocator, initial_capacity);
@@ -304,10 +307,10 @@ pub const World = struct {
 
     allocator: std.mem.Allocator,
 
-    entity_generations: std.array_list.Aligned(u16, null) = .{},
-    entity_alive: std.array_list.Aligned(bool, null) = .{},
+    entity_generations: std.array_list.Aligned(u16, null) = .empty,
+    entity_alive: std.array_list.Aligned(bool, null) = .empty,
 
-    free_list: std.array_list.Aligned(u32, null) = .{},
+    free_list: std.array_list.Aligned(u32, null) = .empty,
     entity_count: u32 = 0,
 
     state: *state.GameState = undefined,
@@ -648,7 +651,11 @@ pub const Systems = struct {
                         }
                     },
                     .change_scene => |cs| {
-                        world.state.eventQueue.push(events.changeSceneByIndex(cs.index)) catch {};
+                        if (cs.use_index) {
+                            world.state.eventQueue.push(events.changeSceneByIndex(cs.index)) catch {};
+                        } else {
+                            world.state.eventQueue.push(events.changeSceneByName(cs.name[0..cs.name_len])) catch {};
+                        }
                     },
                     .set_flag => |sf| {
                         world.state.eventQueue.push(events.setFlag(sf.name[0..sf.name_len], sf.value)) catch {};

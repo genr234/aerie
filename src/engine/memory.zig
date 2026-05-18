@@ -6,7 +6,7 @@ pub const Memory = struct {
     backing: std.mem.Allocator,
 
     /// Keep the GPA alive for the whole engine lifetime in Debug builds.
-    debug_gpa: ?std.heap.GeneralPurposeAllocator(.{}) = null,
+    debug_gpa: ?std.heap.DebugAllocator(.{}) = null,
 
     /// Permanent arena - lives for entire engine lifetime
     permanent_arena: std.heap.ArenaAllocator,
@@ -85,6 +85,10 @@ pub fn init() void {
     if (memory == null) {
         memory = Memory.init();
     }
+}
+
+pub fn isInitialized() bool {
+    return memory != null;
 }
 
 pub fn deinit() void {

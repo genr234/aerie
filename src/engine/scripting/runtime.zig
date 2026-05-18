@@ -5,7 +5,8 @@ const wren_c = @import("wren_c.zig");
 const loader_mod = @import("loader.zig");
 const api = @import("api.zig");
 const context = @import("context.zig");
-const assets = @import("../utils/assets.zig");
+const project = @import("../project.zig");
+const resources = @import("../resources.zig");
 const rl = @import("raylib");
 
 pub const Runtime = struct {
@@ -60,7 +61,7 @@ pub const Runtime = struct {
     tick_count: usize = 0,
 
     // desktop auto-reload.
-    last_mtime_ns: ?i128 = null,
+    last_mtime_ns: ?i96 = null,
 
     // Captured by errorFn for easier debugging.
     last_error: [256]u8 = [_]u8{0} ** 256,
@@ -72,10 +73,12 @@ pub const Runtime = struct {
         allocator: std.mem.Allocator,
         ctx: *context.ScriptingContext,
         project_root: []const u8,
+        script_modules: []const project.ScriptModule,
+        resource_provider: ?resources.ResourceProvider,
         entry_module: []const u8,
         entry_class: []const u8,
     ) !Self {
-        const loader = loader_mod.Loader.init(allocator, project_root);
+        const loader = loader_mod.Loader.init(allocator, project_root, script_modules, resource_provider);
         var self: Self = .{
             .allocator = allocator,
             .loader = loader,
@@ -180,20 +183,7 @@ pub const Runtime = struct {
         // This follows Wren's embedding docs: interpret module source, then
         // look up variables from that same module.
         const module_name = self.entry_module;
-        const rel_path = try std.fmt.allocPrint(self.allocator, "scripts/{s}.wren", .{module_name});
-        defer self.allocator.free(rel_path);
-
-        const asset_path = try assets.resolveAssetPath(self.allocator, self.project_root, rel_path, builtin.os.tag);
-        defer self.allocator.free(asset_path);
-
-        const file = std.fs.cwd().openFile(asset_path, .{}) catch |err| {
-            std.debug.print("[wren] failed to open {s}: {any}\n", .{ asset_path, err });
-            return error.WrenLoadFailed;
-        };
-
-        defer file.close();
-
-        const src = try file.readToEndAlloc(self.allocator, 1 << 20);
+        const src = try self.loader.loadOwnedModuleSource(module_name);
         defer self.allocator.free(src);
 
         const zsrc = try self.allocator.allocSentinel(u8, src.len, 0);
@@ -326,14 +316,18 @@ pub const Runtime = struct {
         if (builtin.os.tag == .emscripten) return false;
 
         // We only do auto-reload in dev with a conventional asset path.
+        if (self.loader.findModuleSource(self.entry_module) != null) return false;
+
         // Module name is like "main" and maps to "assets/scripts/main.wren".
         var buf: [1024]u8 = undefined;
         const rel_path = std.fmt.bufPrint(&buf, "scripts/{s}.wren", .{self.entry_module}) catch return false;
+        const assets = @import("../utils/assets.zig");
         const watch_path = assets.resolveAssetPath(self.allocator, self.project_root, rel_path, builtin.os.tag) catch return false;
         defer self.allocator.free(watch_path);
 
-        const stat = std.fs.cwd().statFile(watch_path) catch return false;
-        const mtime = stat.mtime;
+        const io = std.Io.Threaded.global_single_threaded.io();
+        const stat = std.Io.Dir.cwd().statFile(io, watch_path, .{}) catch return false;
+        const mtime = stat.mtime.nanoseconds;
 
         if (self.last_mtime_ns) |prev| {
             if (mtime <= prev) return false;

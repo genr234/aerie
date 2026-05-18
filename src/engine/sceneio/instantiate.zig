@@ -47,11 +47,18 @@ pub fn instantiateSceneIR(allocator: std.mem.Allocator, scene: *scenes.Scene, ir
 }
 
 pub const TextureTable = struct {
-    player: rl.Texture2D,
+    entries: []const Entry,
+
+    pub const Entry = struct {
+        name: []const u8,
+        texture: rl.Texture2D,
+    };
 
     pub fn get(self: *const TextureTable, name: []const u8) ?rl.Texture2D {
-        if (std.mem.eql(u8, name, "player")) return self.player;
-        if (std.mem.eql(u8, name, "player.png")) return self.player;
+        for (self.entries) |entry| {
+            if (std.mem.eql(u8, entry.name, name)) return entry.texture;
+            if (std.mem.eql(u8, std.fs.path.basename(entry.name), name)) return entry.texture;
+        }
         return null;
     }
 };
@@ -124,8 +131,16 @@ fn lowerTriggerAction(action: types.TriggerActionIR, dialogue: DialogueBindings)
             break :blk ecs.TriggerDialogueStart(@ptrCast(@alignCast(runner_ptr)), null, sd.label);
         },
         .ChangeScene => |cs| blk: {
-            if (cs.index) |idx| break :blk .{ .change_scene = .{ .index = idx } };
-            break :blk ecs.TriggerShowMessage("ChangeScene missing index", 2.0);
+            if (cs.index) |idx| break :blk .{ .change_scene = .{ .index = idx, .use_index = true } };
+            if (cs.name) |name| {
+                var out: ecs.TriggerAction = .{ .change_scene = .{ .index = 0, .name = [_]u8{0} ** events.MAX_ID_LEN, .name_len = 0, .use_index = false } };
+                const len = @min(name.len, events.MAX_ID_LEN - 1);
+                @memcpy(out.change_scene.name[0..len], name[0..len]);
+                out.change_scene.name[len] = 0;
+                out.change_scene.name_len = len;
+                break :blk out;
+            }
+            break :blk ecs.TriggerShowMessage("ChangeScene missing name", 2.0);
         },
         .SetFlag => |sf| blk: {
             var out: ecs.TriggerAction = .{ .set_flag = .{ .name = [_]u8{0} ** events.MAX_ID_LEN, .name_len = 0, .value = sf.value } };

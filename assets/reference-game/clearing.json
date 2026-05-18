@@ -1,0 +1,43 @@
+{
+  "name": "clearing",
+  "type": "exploration",
+  "size": { "width": 800, "height": 450 },
+  "entities": [
+    {
+      "tag": "main_camera",
+      "components": {
+        "Transform": { "position": [0, 0] },
+        "Camera": { "offset": [400, 225], "zoom": 1.0, "followTag": "player" }
+      }
+    },
+    {
+      "tag": "player",
+      "components": {
+        "Transform": { "position": [120, 220] },
+        "Sprite": { "texture": "reference-game/player.png" },
+        "PlayerController": { "speed": 115 }
+      }
+    },
+    {
+      "tag": "grass",
+      "components": {
+        "Transform": { "position": [0, 300] },
+        "Rect": { "width": 800, "height": 150, "color": "#86b56b" }
+      }
+    },
+    {
+      "tag": "gate",
+      "components": {
+        "Transform": { "position": [560, 170] },
+        "Rect": { "width": 90, "height": 120, "color": "#315f72" }
+      }
+    },
+    {
+      "tag": "arrival_marker",
+      "components": {
+        "Transform": { "position": [602, 160] },
+        "Circle": { "radius": 10, "color": "#f7d96b" }
+      }
+    }
+  ]
+}

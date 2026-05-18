@@ -1,8 +1,12 @@
 {
-  "id": "demo",
-  "title": "Test Game",
+  "id": "reference-slice",
+  "title": "Reference Slice",
   "version": "0.1.0",
   "entry": { "module": "main", "class": "Game" },
-  "start_scene": "assets/scenes/start.json",
-  "window": { "width": 800, "height": 450, "title": "Test Game" }
+  "start_scene": "crossroads",
+  "scenes": [
+    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
+    { "name": "clearing", "path": "assets/reference-game/clearing.json" }
+  ],
+  "window": { "width": 800, "height": 450, "title": "Reference Slice" }
 }
