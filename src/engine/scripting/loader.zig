@@ -80,10 +80,6 @@ pub const Loader = struct {
         _ = vm;
 
         const mod_name = std.mem.span(name);
-        std.debug.print("[wren] loadModule '{s}'\n", .{mod_name});
-        std.debug.print("[wren]   (raw) ", .{});
-        for (mod_name) |ch| std.debug.print("{X:0>2} ", .{ch});
-        std.debug.print("\n", .{});
 
         if (std.mem.eql(u8, mod_name, "engine/api")) {
             return loadEngineApiModule();
@@ -110,7 +106,6 @@ pub const Loader = struct {
         const asset_path = self.moduleNameToAssetPath(name) catch {
             return .{ .source = null, .onComplete = null, .userData = null };
         };
-        std.debug.print("[wren]   -> '{s}'\n", .{asset_path});
 
         const io = std.Io.Threaded.global_single_threaded.io();
         var file = std.Io.Dir.cwd().openFile(io, asset_path, .{}) catch {
@@ -158,7 +153,6 @@ pub const Loader = struct {
 
     fn loadEngineApiModule() wren_c.c.WrenLoadModuleResult {
         // The module source is embedded (static storage); no onComplete needed.
-        std.debug.print("[wren] providing embedded module 'engine/api'\n", .{});
         return .{ .source = engine_api_source.ptr, .onComplete = null, .userData = null };
     }
 

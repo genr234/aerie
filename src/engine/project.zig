@@ -1,7 +1,14 @@
 const std = @import("std");
 const resources = @import("resources.zig");
 
-pub const ProjectError = error{ InvalidJson, MissingField, InvalidType };
+pub const ProjectError = error{
+    InvalidJson,
+    MissingField,
+    InvalidType,
+    EmptyScenes,
+    DuplicateSceneName,
+    MissingStartScene,
+};
 
 pub const ProjectConfig = struct {
     id: []const u8,
@@ -55,7 +62,6 @@ pub const ProjectBundle = struct {
                 if (self.findScene(decl.name)) |scene| return scene;
             }
         }
-        if (self.scenes.len > 0) return self.scenes[0];
         return null;
     }
 
@@ -87,7 +93,9 @@ pub fn loadProjectBundleFromFs(allocator: std.mem.Allocator, project_root: []con
     fs_provider.* = .{ .root = try dupString(allocator, project_root) };
     const provider = fs_provider.provider();
 
-    const cfg = projectConfigOrDefault(allocator, provider);
+    const config_text = provider.readText(allocator, "game.json") catch return ProjectError.MissingField;
+    defer allocator.free(config_text);
+    const cfg = try parseProjectConfigJson(allocator, config_text);
 
     const scenes = if (cfg.scenes.len > 0)
         try loadDeclaredScenes(allocator, provider, cfg.scenes)
@@ -107,20 +115,6 @@ pub fn loadProjectBundleFromFs(allocator: std.mem.Allocator, project_root: []con
         .scripts = scripts,
         .resources = provider,
         .asset_root = try dupString(allocator, project_root),
-    };
-}
-
-fn projectConfigOrDefault(allocator: std.mem.Allocator, provider: resources.ResourceProvider) ProjectConfig {
-    const text = provider.readText(allocator, "game.json") catch return ProjectConfig{
-        .id = "demo",
-        .title = "Test Game",
-        .window_title = "Test Game",
-    };
-    defer allocator.free(text);
-    return parseProjectConfigJson(allocator, text) catch ProjectConfig{
-        .id = "demo",
-        .title = "Test Game",
-        .window_title = "Test Game",
     };
 }
 
@@ -202,7 +196,10 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
     }
 
     if (obj.get("start_scene")) |s| cfg.start_scene = try dupString(allocator, try asString(s));
-    if (obj.get("scenes")) |s| cfg.scenes = try parseSceneDecls(allocator, s);
+    if (obj.get("scenes")) |s| {
+        cfg.scenes = try parseSceneDecls(allocator, s);
+        if (!sceneDeclsContainStart(cfg.scenes, cfg.start_scene)) return ProjectError.MissingStartScene;
+    }
 
     if (obj.get("window")) |w| {
         if (w != .object) return ProjectError.InvalidType;
@@ -230,19 +227,32 @@ fn loadDeclaredScenes(allocator: std.mem.Allocator, provider: resources.Resource
 
 fn parseSceneDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]SceneDecl {
     if (v != .array) return ProjectError.InvalidType;
+    if (v.array.items.len == 0) return ProjectError.EmptyScenes;
 
     const out = try allocator.alloc(SceneDecl, v.array.items.len);
     errdefer allocator.free(out);
 
     for (v.array.items, 0..) |item, i| {
         if (item != .object) return ProjectError.InvalidType;
-        out[i] = .{
+        const decl = SceneDecl{
             .name = try dupString(allocator, try getString(item.object, "name")),
             .path = try dupString(allocator, try getString(item.object, "path")),
         };
+        for (out[0..i]) |existing| {
+            if (std.mem.eql(u8, existing.name, decl.name)) return ProjectError.DuplicateSceneName;
+        }
+        out[i] = decl;
     }
 
     return out;
+}
+
+fn sceneDeclsContainStart(decls: []const SceneDecl, start_scene: []const u8) bool {
+    for (decls) |decl| {
+        if (std.mem.eql(u8, decl.name, start_scene)) return true;
+        if (std.mem.eql(u8, decl.path, start_scene)) return true;
+    }
+    return false;
 }
 
 fn getString(obj: std.json.ObjectMap, key: []const u8) ![]const u8 {
@@ -309,4 +319,66 @@ test "project bundle resolves start scene by declared scene name" {
 
     const start = bundle.startScene() orelse return error.TestExpectedEqual;
     try std.testing.expectEqualStrings("clearing", start.name);
+}
+
+test "project config rejects empty declared scene list" {
+    const text =
+        \\{
+        \\  "id": "reference",
+        \\  "title": "Reference",
+        \\  "start_scene": "crossroads",
+        \\  "scenes": []
+        \\}
+    ;
+
+    try std.testing.expectError(ProjectError.EmptyScenes, parseProjectConfigJson(std.testing.allocator, text));
+}
+
+test "project config rejects duplicate scene names" {
+    const text =
+        \\{
+        \\  "id": "reference",
+        \\  "title": "Reference",
+        \\  "start_scene": "crossroads",
+        \\  "scenes": [
+        \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
+        \\    { "name": "crossroads", "path": "assets/reference-game/other.json" }
+        \\  ]
+        \\}
+    ;
+
+    try std.testing.expectError(ProjectError.DuplicateSceneName, parseProjectConfigJson(std.testing.allocator, text));
+}
+
+test "project config rejects missing declared start scene" {
+    const text =
+        \\{
+        \\  "id": "reference",
+        \\  "title": "Reference",
+        \\  "start_scene": "missing",
+        \\  "scenes": [
+        \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" }
+        \\  ]
+        \\}
+    ;
+
+    try std.testing.expectError(ProjectError.MissingStartScene, parseProjectConfigJson(std.testing.allocator, text));
+}
+
+test "project bundle does not fall back when start scene is unresolved" {
+    const scenes = [_]SceneSource{
+        .{ .name = "crossroads", .json = "{}" },
+    };
+    const cfg = ProjectConfig{
+        .id = "reference",
+        .title = "Reference",
+        .start_scene = "missing",
+    };
+    const bundle = ProjectBundle{
+        .config = cfg,
+        .scenes = @constCast(&scenes),
+        .scripts = &.{},
+    };
+
+    try std.testing.expect(bundle.startScene() == null);
 }

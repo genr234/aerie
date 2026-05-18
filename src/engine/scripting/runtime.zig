@@ -191,7 +191,6 @@ pub const Runtime = struct {
         @memcpy(zsrc[0..src.len], src);
 
         const interpret_res = wren_c.c.wrenInterpret(vm, module_name.ptr, zsrc.ptr);
-        std.debug.print("[wren] interpret '{s}' res={d}\\n", .{ module_name, @as(u32, @intCast(interpret_res)) });
         if (interpret_res != wren_c.c.WREN_RESULT_SUCCESS) {
             if (self.last_error_len > 0) {
                 std.debug.print("[wren] interpret error: {s}\\n", .{self.last_error[0..self.last_error_len]});
@@ -234,7 +233,6 @@ pub const Runtime = struct {
 
         // call once on init.
         self.boot_ok = self.callOnBoot();
-        std.debug.print("[wren] callOnBoot ok={any}\n", .{self.boot_ok});
 
         // seed mtime for auto reload.
         _ = self.checkAndUpdateMtime();

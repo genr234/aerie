@@ -96,3 +96,23 @@ pub fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
         else => |e| return e,
     };
 }
+
+test "memory resource provider reads normalized text paths" {
+    const entries = [_]MemoryResource{
+        .{ .path = "assets/scenes/start.json", .bytes = "{\"entities\":[]}" },
+    };
+    var provider_state = MemoryResourceProvider{ .entries = &entries };
+    const provider = provider_state.provider();
+
+    const text = try provider.readText(std.testing.allocator, "/assets/scenes/start.json");
+    defer std.testing.allocator.free(text);
+
+    try std.testing.expectEqualStrings("{\"entities\":[]}", text);
+}
+
+test "memory resource provider reports missing resources" {
+    var provider_state = MemoryResourceProvider{ .entries = &.{} };
+    const provider = provider_state.provider();
+
+    try std.testing.expectError(Error.MissingResource, provider.readBytes(std.testing.allocator, "missing.bin"));
+}
