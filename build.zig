@@ -182,12 +182,12 @@ pub fn build(b: *std.Build) void {
         }),
         .linkage = .static,
     });
-    wren_lib.linkLibC();
-    wren_lib.addIncludePath(b.path("src/third-party/wren/src/include"));
-    wren_lib.addIncludePath(b.path("src/third-party/wren/src/vm"));
-    wren_lib.addIncludePath(b.path("src/third-party/wren/src/optional"));
+    wren_lib.root_module.link_libc = true;
+    wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/include"));
+    wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/vm"));
+    wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/optional"));
 
-    wren_lib.addCSourceFiles(.{
+    wren_lib.root_module.addCSourceFiles(.{
         .root = b.path("src/third-party/wren/src"),
         .files = &.{
             "vm/wren_compiler.c",
@@ -223,9 +223,9 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
-        wasm.linkLibrary(raylib_artifact);
-        wasm.linkLibrary(wren_lib);
-        wasm.addIncludePath(b.path("src/third-party/wren/src/include"));
+        wasm.root_module.linkLibrary(raylib_artifact);
+        wasm.root_module.linkLibrary(wren_lib);
+        wasm.root_module.addIncludePath(b.path("src/third-party/wren/src/include"));
         wasm.root_module.addImport("raylib", raylib);
         wasm.root_module.addImport("raygui", raygui);
 
@@ -267,9 +267,9 @@ pub fn build(b: *std.Build) void {
     }
 
     if (exe != null) {
-        exe.?.linkLibrary(raylib_artifact);
-        exe.?.linkLibrary(wren_lib);
-        exe.?.addIncludePath(b.path("src/third-party/wren/src/include"));
+        exe.?.root_module.linkLibrary(raylib_artifact);
+        exe.?.root_module.linkLibrary(wren_lib);
+        exe.?.root_module.addIncludePath(b.path("src/third-party/wren/src/include"));
         exe.?.root_module.addImport("raylib", raylib);
         exe.?.root_module.addImport("raygui", raygui);
     }

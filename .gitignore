@@ -6,3 +6,5 @@ reference/
 .DS_Store
 .bazelbsp/
 .codex/
+.tools/
+zig-pkg/
