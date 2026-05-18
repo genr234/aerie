@@ -3,3 +3,6 @@ zig-out
 .idea
 .idea_modules/
 reference/
+.DS_Store
+.bazelbsp/
+.codex/
