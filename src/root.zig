@@ -14,6 +14,8 @@ pub const project = @import("engine/project.zig");
 pub const resources = @import("engine/resources.zig");
 pub const engine = @import("engine/engine.zig");
 pub const scripting = @import("engine/scripting/runtime.zig");
+pub const sceneio_json = @import("engine/sceneio/json.zig");
+pub const sceneio_json_writer = @import("engine/sceneio/json_writer.zig");
 
 pub fn bufferedPrint() !void {
     // Stdout is for the actual output of your application, for example if you
