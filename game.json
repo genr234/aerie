@@ -8,5 +8,8 @@
     { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
     { "name": "clearing", "path": "assets/reference-game/clearing.json" }
   ],
+  "scripts": [
+    { "name": "main", "path": "assets/scripts/main.wren" }
+  ],
   "window": { "width": 800, "height": 450, "title": "Reference Slice" }
 }

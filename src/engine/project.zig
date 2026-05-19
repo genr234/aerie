@@ -7,6 +7,7 @@ pub const ProjectError = error{
     InvalidType,
     EmptyScenes,
     DuplicateSceneName,
+    DuplicateScriptName,
     MissingStartScene,
 };
 
@@ -20,6 +21,7 @@ pub const ProjectConfig = struct {
 
     start_scene: []const u8 = "assets/scenes/start.json",
     scenes: []SceneDecl = &.{},
+    scripts: []ScriptDecl = &.{},
 
     window_width: i32 = 800,
     window_height: i32 = 450,
@@ -27,6 +29,11 @@ pub const ProjectConfig = struct {
 };
 
 pub const SceneDecl = struct {
+    name: []const u8,
+    path: []const u8,
+};
+
+pub const ScriptDecl = struct {
     name: []const u8,
     path: []const u8,
 };
@@ -44,7 +51,7 @@ pub const ScriptModule = struct {
 pub const ProjectBundle = struct {
     config: ProjectConfig,
     scenes: []SceneSource,
-    scripts: []ScriptModule,
+    scripts: []const ScriptModule,
     resources: ?resources.ResourceProvider = null,
     asset_root: []const u8 = ".",
 
@@ -93,8 +100,7 @@ pub fn loadProjectBundleFromFs(allocator: std.mem.Allocator, project_root: []con
     fs_provider.* = .{ .root = try dupString(allocator, project_root) };
     const provider = fs_provider.provider();
 
-    const scripts = try loadScriptModulesFromFs(allocator, project_root);
-    return loadProjectBundleFromProviderWithScripts(allocator, provider, project_root, scripts);
+    return loadProjectBundleFromProviderWithFallbackScripts(allocator, provider, project_root, project_root);
 }
 
 pub fn loadProjectBundleFromProvider(
@@ -102,14 +108,14 @@ pub fn loadProjectBundleFromProvider(
     provider: resources.ResourceProvider,
     asset_root: []const u8,
 ) !ProjectBundle {
-    return loadProjectBundleFromProviderWithScripts(allocator, provider, asset_root, &.{});
+    return loadProjectBundleFromProviderWithFallbackScripts(allocator, provider, asset_root, null);
 }
 
-fn loadProjectBundleFromProviderWithScripts(
+fn loadProjectBundleFromProviderWithFallbackScripts(
     allocator: std.mem.Allocator,
     provider: resources.ResourceProvider,
     asset_root: []const u8,
-    scripts: []ScriptModule,
+    fallback_scripts_root: ?[]const u8,
 ) !ProjectBundle {
     const config_text = provider.readText(allocator, "game.json") catch return ProjectError.MissingField;
     defer allocator.free(config_text);
@@ -124,6 +130,13 @@ fn loadProjectBundleFromProviderWithScripts(
         out[0] = .{ .name = scene_name, .json = scene_json };
         break :blk out;
     };
+
+    const scripts = if (cfg.scripts.len > 0)
+        try loadDeclaredScripts(allocator, provider, cfg.scripts)
+    else if (fallback_scripts_root) |project_root|
+        try loadScriptModulesFromFs(allocator, project_root)
+    else
+        &.{};
 
     return .{
         .config = cfg,
@@ -216,6 +229,7 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
         cfg.scenes = try parseSceneDecls(allocator, s);
         if (!sceneDeclsContainStart(cfg.scenes, cfg.start_scene)) return ProjectError.MissingStartScene;
     }
+    if (obj.get("scripts")) |s| cfg.scripts = try parseScriptDecls(allocator, s);
 
     if (obj.get("window")) |w| {
         if (w != .object) return ProjectError.InvalidType;
@@ -241,6 +255,20 @@ fn loadDeclaredScenes(allocator: std.mem.Allocator, provider: resources.Resource
     return scenes;
 }
 
+fn loadDeclaredScripts(allocator: std.mem.Allocator, provider: resources.ResourceProvider, decls: []const ScriptDecl) ![]ScriptModule {
+    const scripts = try allocator.alloc(ScriptModule, decls.len);
+    errdefer allocator.free(scripts);
+
+    for (decls, 0..) |decl, i| {
+        scripts[i] = .{
+            .name = try dupString(allocator, decl.name),
+            .source = try provider.readText(allocator, decl.path),
+        };
+    }
+
+    return scripts;
+}
+
 fn parseSceneDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]SceneDecl {
     if (v != .array) return ProjectError.InvalidType;
     if (v.array.items.len == 0) return ProjectError.EmptyScenes;
@@ -256,6 +284,27 @@ fn parseSceneDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]SceneDecl
         };
         for (out[0..i]) |existing| {
             if (std.mem.eql(u8, existing.name, decl.name)) return ProjectError.DuplicateSceneName;
+        }
+        out[i] = decl;
+    }
+
+    return out;
+}
+
+fn parseScriptDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]ScriptDecl {
+    if (v != .array) return ProjectError.InvalidType;
+
+    const out = try allocator.alloc(ScriptDecl, v.array.items.len);
+    errdefer allocator.free(out);
+
+    for (v.array.items, 0..) |item, i| {
+        if (item != .object) return ProjectError.InvalidType;
+        const decl = ScriptDecl{
+            .name = try dupString(allocator, try getString(item.object, "name")),
+            .path = try dupString(allocator, try getString(item.object, "path")),
+        };
+        for (out[0..i]) |existing| {
+            if (std.mem.eql(u8, existing.name, decl.name)) return ProjectError.DuplicateScriptName;
         }
         out[i] = decl;
     }
@@ -306,6 +355,9 @@ test "project config parses declared scenes and start scene name" {
         \\  "scenes": [
         \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
         \\    { "name": "clearing", "path": "assets/reference-game/clearing.json" }
+        \\  ],
+        \\  "scripts": [
+        \\    { "name": "main", "path": "assets/scripts/main.wren" }
         \\  ]
         \\}
     ;
@@ -315,6 +367,9 @@ test "project config parses declared scenes and start scene name" {
     try std.testing.expectEqual(@as(usize, 2), cfg.scenes.len);
     try std.testing.expectEqualStrings("clearing", cfg.scenes[1].name);
     try std.testing.expectEqualStrings("assets/reference-game/clearing.json", cfg.scenes[1].path);
+    try std.testing.expectEqual(@as(usize, 1), cfg.scripts.len);
+    try std.testing.expectEqualStrings("main", cfg.scripts[0].name);
+    try std.testing.expectEqualStrings("assets/scripts/main.wren", cfg.scripts[0].path);
 }
 
 test "project bundle resolves start scene by declared scene name" {
@@ -366,6 +421,21 @@ test "project config rejects duplicate scene names" {
     try std.testing.expectError(ProjectError.DuplicateSceneName, parseProjectConfigJson(std.testing.allocator, text));
 }
 
+test "project config rejects duplicate script names" {
+    const text =
+        \\{
+        \\  "id": "reference",
+        \\  "title": "Reference",
+        \\  "scripts": [
+        \\    { "name": "main", "path": "assets/scripts/main.wren" },
+        \\    { "name": "main", "path": "assets/scripts/other.wren" }
+        \\  ]
+        \\}
+    ;
+
+    try std.testing.expectError(ProjectError.DuplicateScriptName, parseProjectConfigJson(std.testing.allocator, text));
+}
+
 test "project config rejects missing declared start scene" {
     const text =
         \\{
@@ -410,6 +480,9 @@ test "project bundle loads from memory resource provider" {
             \\  "start_scene": "crossroads",
             \\  "scenes": [
             \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" }
+            \\  ],
+            \\  "scripts": [
+            \\    { "name": "main", "path": "assets/scripts/main.wren" }
             \\  ]
             \\}
             ,
@@ -417,6 +490,10 @@ test "project bundle loads from memory resource provider" {
         .{
             .path = "assets/reference-game/crossroads.json",
             .bytes = "{\"entities\":[]}",
+        },
+        .{
+            .path = "assets/scripts/main.wren",
+            .bytes = "class Game {}",
         },
     };
     var provider_state = resources.MemoryResourceProvider{ .entries = &entries };
@@ -427,5 +504,8 @@ test "project bundle loads from memory resource provider" {
     try std.testing.expectEqual(@as(usize, 1), bundle.scenes.len);
     try std.testing.expectEqualStrings("crossroads", bundle.scenes[0].name);
     try std.testing.expectEqualStrings("{\"entities\":[]}", bundle.scenes[0].json);
+    try std.testing.expectEqual(@as(usize, 1), bundle.scripts.len);
+    try std.testing.expectEqualStrings("main", bundle.scripts[0].name);
+    try std.testing.expectEqualStrings("class Game {}", bundle.scripts[0].source);
     try std.testing.expectEqualStrings("memory://reference", bundle.asset_root);
 }
