@@ -40,6 +40,20 @@ Dialogue assets live under `assets/dialogues/`. The v1 editor format is data-dri
 
 Nodes and choices may include `when` conditions such as `flag_name`, `!flag_name`, or `score >= 2`. Supported actions are `setFlag`, `changeScene`, and `showMessage`.
 
+The editor may add optional layout metadata for the node graph:
+
+```json
+{
+  "editor": {
+    "nodes": {
+      "hello": { "x": 40, "y": 40 }
+    }
+  }
+}
+```
+
+This metadata is ignored by the runtime and can be omitted.
+
 Scene trigger actions can start dialogue with:
 
 ```json

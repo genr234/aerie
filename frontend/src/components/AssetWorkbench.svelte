@@ -20,7 +20,8 @@
         const mime = lower.endsWith(".jpg") || lower.endsWith(".jpeg")
           ? "image/jpeg"
           : "image/png";
-        objectUrl = URL.createObjectURL(new Blob([file.bytes], { type: mime }));
+        const bytes = Uint8Array.from(file.bytes);
+        objectUrl = URL.createObjectURL(new Blob([bytes], { type: mime }));
       }
     }
   }
