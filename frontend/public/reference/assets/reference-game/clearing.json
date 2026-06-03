@@ -2,6 +2,7 @@
   "name": "clearing",
   "type": "exploration",
   "size": { "width": 800, "height": 450 },
+  "background": { "color": "#1b3034" },
   "entities": [
     {
       "tag": "main_camera",
@@ -11,32 +12,91 @@
       }
     },
     {
-      "tag": "player",
+      "tag": "tree_line",
       "components": {
-        "Transform": { "position": [120, 220] },
-        "Sprite": { "texture": "reference-game/player.png" },
-        "PlayerController": { "speed": 115 }
+        "Transform": { "position": [0, 0] },
+        "Rect": { "width": 800, "height": 160, "color": "#18362f" }
       }
     },
     {
       "tag": "grass",
       "components": {
-        "Transform": { "position": [0, 300] },
-        "Rect": { "width": 800, "height": 150, "color": "#86b56b" }
+        "Transform": { "position": [0, 256] },
+        "Rect": { "width": 800, "height": 194, "color": "#5f8f5f" }
       }
     },
     {
-      "tag": "gate",
+      "tag": "lit_floor",
       "components": {
-        "Transform": { "position": [560, 170] },
-        "Rect": { "width": 90, "height": 120, "color": "#315f72" }
+        "Transform": { "position": [248, 246] },
+        "Rect": { "width": 330, "height": 110, "color": "#9ab96d" }
       }
     },
     {
-      "tag": "arrival_marker",
+      "tag": "player",
       "components": {
-        "Transform": { "position": [602, 160] },
-        "Circle": { "radius": 10, "color": "#f7d96b" }
+        "Transform": { "position": [124, 245] },
+        "Sprite": { "texture": "reference-game/player.png" },
+        "PlayerController": { "speed": 125 }
+      }
+    },
+    {
+      "tag": "lantern_gate",
+      "components": {
+        "Transform": { "position": [560, 164] },
+        "Rect": { "width": 96, "height": 132, "color": "#315d68" }
+      }
+    },
+    {
+      "tag": "gate_light",
+      "components": {
+        "Transform": { "position": [608, 176] },
+        "Circle": { "radius": 18, "color": "#ffe28a" }
+      }
+    },
+    {
+      "tag": "ring_light_a",
+      "components": {
+        "Transform": { "position": [328, 260] },
+        "Circle": { "radius": 10, "color": "#f8d66e" }
+      }
+    },
+    {
+      "tag": "ring_light_b",
+      "components": {
+        "Transform": { "position": [432, 260] },
+        "Circle": { "radius": 10, "color": "#f8d66e" }
+      }
+    },
+    {
+      "tag": "ring_light_c",
+      "components": {
+        "Transform": { "position": [380, 315] },
+        "Circle": { "radius": 10, "color": "#f8d66e" }
+      }
+    },
+    {
+      "tag": "memory_marker",
+      "components": {
+        "Transform": { "position": [690, 292] },
+        "Rect": { "width": 34, "height": 48, "color": "#6c7481" }
+      }
+    },
+    {
+      "tag": "memory_glow",
+      "components": {
+        "Transform": { "position": [707, 288] },
+        "Circle": { "radius": 8, "color": "#d8f1ff" }
+      }
+    },
+    {
+      "tag": "arrival_message",
+      "components": {
+        "Trigger": {
+          "bounds": [280, 220, 240, 140],
+          "oneShot": true,
+          "action": { "showMessage": { "text": "Lanterns mark the safe ground. The trail can grow from here.", "duration": 4 } }
+        }
       }
     }
   ]

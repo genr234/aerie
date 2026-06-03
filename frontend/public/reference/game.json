@@ -1,6 +1,6 @@
 {
-  "id": "reference-slice",
-  "title": "Reference Slice",
+  "id": "lantern-trail",
+  "title": "Lantern Trail",
   "version": "0.1.0",
   "entry": { "module": "main", "class": "Game" },
   "start_scene": "crossroads",
@@ -11,5 +11,5 @@
   "scripts": [
     { "name": "main", "path": "assets/scripts/main.wren" }
   ],
-  "window": { "width": 800, "height": 450, "title": "Reference Slice" }
+  "window": { "width": 800, "height": 450, "title": "Lantern Trail" }
 }

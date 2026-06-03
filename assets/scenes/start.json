@@ -2,6 +2,7 @@
   "name": "start",
   "type": "exploration",
   "size": { "width": 800, "height": 450 },
+  "background": { "color": "#1b2830" },
   "entities": [
     {
       "tag": "main_camera",
@@ -11,34 +12,62 @@
       }
     },
     {
+      "tag": "ground",
+      "components": {
+        "Transform": { "position": [0, 292] },
+        "Rect": { "width": 800, "height": 158, "color": "#526f57" }
+      }
+    },
+    {
+      "tag": "trail",
+      "components": {
+        "Transform": { "position": [0, 246] },
+        "Rect": { "width": 800, "height": 74, "color": "#b5a06d" }
+      }
+    },
+    {
       "tag": "player",
       "components": {
-        "Transform": { "position": [400, 225] },
+        "Transform": { "position": [120, 226] },
         "Sprite": { "texture": "player.png" },
-        "PlayerController": { "speed": 100 }
+        "PlayerController": { "speed": 120 }
       }
     },
     {
-      "tag": "origin_circle",
+      "tag": "signal_post",
       "components": {
-        "Transform": { "position": [0, 0] },
-        "Circle": { "radius": 4, "color": "blue" }
+        "Transform": { "position": [512, 178] },
+        "Rect": { "width": 42, "height": 96, "color": "#5f6872" }
       }
     },
     {
-      "tag": "trigger_zone",
+      "tag": "signal_light",
       "components": {
-        "Transform": { "position": [300, 200] },
-        "Rect": { "width": 50, "height": 50, "color": "green" }
+        "Transform": { "position": [533, 174] },
+        "Circle": { "radius": 14, "color": "#ffd56f" }
       }
     },
     {
-      "tag": "dialogue_trigger",
+      "tag": "marker_a",
+      "components": {
+        "Transform": { "position": [265, 232] },
+        "Circle": { "radius": 8, "color": "#f4c75f" }
+      }
+    },
+    {
+      "tag": "marker_b",
+      "components": {
+        "Transform": { "position": [380, 230] },
+        "Circle": { "radius": 8, "color": "#f4c75f" }
+      }
+    },
+    {
+      "tag": "signal_trigger",
       "components": {
         "Trigger": {
-          "bounds": [300, 200, 50, 50],
+          "bounds": [486, 154, 96, 126],
           "oneShot": false,
-          "action": { "startDialogue": {} }
+          "action": { "showMessage": { "text": "This is a compact demo scene: player, camera, props, and a reusable trigger.", "duration": 4 } }
         }
       }
     }

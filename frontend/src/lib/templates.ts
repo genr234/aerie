@@ -83,6 +83,7 @@ import { writeScene } from './project';
         name: "crossroads",
         type: "exploration",
         size: { width: 800, height: 450 },
+        background: { color: "#182a2f" },
         entities: [
           {
             tag: "main_camera",
@@ -94,37 +95,72 @@ import { writeScene } from './project';
           {
             tag: "player",
             components: {
-              Transform: { position: [96, 208] },
+              Transform: { position: [96, 238] },
               Sprite: { texture: "reference-game/player.png" },
-              PlayerController: { speed: 115 },
+              PlayerController: { speed: 125 },
+            },
+          },
+          {
+            tag: "moon_pool",
+            components: {
+              Transform: { position: [64, 56] },
+              Circle: { radius: 54, color: "#d8f1ff" },
+            },
+          },
+          {
+            tag: "north_bank",
+            components: {
+              Transform: { position: [0, 0] },
+              Rect: { width: 800, height: 178, color: "#243f38" },
+            },
+          },
+          {
+            tag: "south_bank",
+            components: {
+              Transform: { position: [0, 330] },
+              Rect: { width: 800, height: 120, color: "#1f3a34" },
             },
           },
           {
             tag: "path",
             components: {
-              Transform: { position: [0, 260] },
-              Rect: { width: 800, height: 74, color: "#d9d0a3" },
+              Transform: { position: [0, 252] },
+              Rect: { width: 800, height: 82, color: "#b8a777" },
             },
           },
           {
-            tag: "stone",
+            tag: "north_path",
             components: {
-              Transform: { position: [548, 205] },
-              Rect: { width: 70, height: 64, color: "#7a7f87" },
+              Transform: { position: [344, 136] },
+              Rect: { width: 98, height: 164, color: "#a99767" },
             },
           },
           {
-            tag: "stone_glow",
+            tag: "waystone",
             components: {
-              Transform: { position: [582, 200] },
-              Circle: { radius: 8, color: "#f7d96b" },
+              Transform: { position: [548, 196] },
+              Rect: { width: 72, height: 76, color: "#6c7481" },
+            },
+          },
+          {
+            tag: "waystone_core",
+            components: {
+              Transform: { position: [584, 213] },
+              Circle: { radius: 16, color: "#ffe28a" },
+            },
+          },
+          {
+            tag: "gate_hint",
+            components: {
+              Transform: { position: [704, 184] },
+              Rect: { width: 50, height: 120, color: "#315d68" },
             },
           },
           {
             tag: "stone_trigger",
             components: {
               Trigger: {
-                bounds: [520, 180, 130, 120],
+                bounds: [510, 170, 152, 132],
                 oneShot: true,
                 action: { setFlag: { name: "stone_touched", value: true } },
               },
@@ -136,6 +172,7 @@ import { writeScene } from './project';
         name: "clearing",
         type: "exploration",
         size: { width: 800, height: 450 },
+        background: { color: "#1b3034" },
         entities: [
           {
             tag: "main_camera",
@@ -147,16 +184,52 @@ import { writeScene } from './project';
           {
             tag: "player",
             components: {
-              Transform: { position: [120, 220] },
+              Transform: { position: [124, 245] },
               Sprite: { texture: "reference-game/player.png" },
-              PlayerController: { speed: 115 },
+              PlayerController: { speed: 125 },
             },
           },
           {
             tag: "grass",
             components: {
-              Transform: { position: [0, 275] },
-              Rect: { width: 800, height: 80, color: "#89b36d" },
+              Transform: { position: [0, 256] },
+              Rect: { width: 800, height: 194, color: "#5f8f5f" },
+            },
+          },
+          {
+            tag: "lit_floor",
+            components: {
+              Transform: { position: [248, 246] },
+              Rect: { width: 330, height: 110, color: "#9ab96d" },
+            },
+          },
+          {
+            tag: "lantern_gate",
+            components: {
+              Transform: { position: [560, 164] },
+              Rect: { width: 96, height: 132, color: "#315d68" },
+            },
+          },
+          {
+            tag: "gate_light",
+            components: {
+              Transform: { position: [608, 176] },
+              Circle: { radius: 18, color: "#ffe28a" },
+            },
+          },
+          {
+            tag: "arrival_message",
+            components: {
+              Trigger: {
+                bounds: [280, 220, 240, 140],
+                oneShot: true,
+                action: {
+                  showMessage: {
+                    text: "Lanterns mark the safe ground. The trail can grow from here.",
+                    duration: 4,
+                  },
+                },
+              },
             },
           },
         ],
@@ -170,6 +243,7 @@ import { writeScene } from './project';
         name: "start",
         type: "exploration",
         size: { width: 800, height: 450 },
+        background: { color: "#1b2830" },
         entities: [
           {
             tag: "main_camera",
@@ -181,9 +255,37 @@ import { writeScene } from './project';
           {
             tag: "player",
             components: {
-              Transform: { position: [128, 220] },
+              Transform: { position: [120, 226] },
               Sprite: { texture: "reference-game/player.png" },
-              PlayerController: { speed: 115 },
+              PlayerController: { speed: 120 },
+            },
+          },
+          {
+            tag: "ground",
+            components: {
+              Transform: { position: [0, 292] },
+              Rect: { width: 800, height: 158, color: "#526f57" },
+            },
+          },
+          {
+            tag: "trail",
+            components: {
+              Transform: { position: [0, 246] },
+              Rect: { width: 800, height: 74, color: "#b5a06d" },
+            },
+          },
+          {
+            tag: "signal_post",
+            components: {
+              Transform: { position: [512, 178] },
+              Rect: { width: 42, height: 96, color: "#5f6872" },
+            },
+          },
+          {
+            tag: "signal_light",
+            components: {
+              Transform: { position: [533, 174] },
+              Circle: { radius: 14, color: "#ffd56f" },
             },
           },
         ],
@@ -280,19 +382,21 @@ class Game {
   static onBoot() {
     State.set("stone_touched", false)
     State.set("crossroads_done", false)
-    Events.message("Walk to the lit stone.", 3)
+    Events.message("Follow the amber markers to wake the waystone.", 4)
   }
 
   static onUpdate(dt) {
     if (State.getFlag("stone_touched") && !State.getFlag("crossroads_done")) {
       State.set("crossroads_done", true)
-      Events.message("The stone remembers you. The path opens.", 3)
+      Events.message("The waystone hums. A lantern gate opens east.", 4)
       Scene.go("clearing")
     }
   }
 
   static onDraw() {
-    UI.text(18, 18, "Tiny Story")
+    var place = Scene.currentIndex() == Scene.findIndex("clearing") ? "Clearing" : "Crossroads"
+    var touched = State.getFlag("stone_touched") ? "awake" : "sleeping"
+    UI.text(18, 18, "%(place) | waystone: %(touched)")
   }
 }
 `;

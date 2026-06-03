@@ -2,6 +2,7 @@
   "name": "crossroads",
   "type": "exploration",
   "size": { "width": 800, "height": 450 },
+  "background": { "color": "#182a2f" },
   "entities": [
     {
       "tag": "main_camera",
@@ -11,39 +12,102 @@
       }
     },
     {
+      "tag": "moon_pool",
+      "components": {
+        "Transform": { "position": [64, 56] },
+        "Circle": { "radius": 54, "color": "#d8f1ff" }
+      }
+    },
+    {
+      "tag": "north_bank",
+      "components": {
+        "Transform": { "position": [0, 0] },
+        "Rect": { "width": 800, "height": 178, "color": "#243f38" }
+      }
+    },
+    {
+      "tag": "south_bank",
+      "components": {
+        "Transform": { "position": [0, 330] },
+        "Rect": { "width": 800, "height": 120, "color": "#1f3a34" }
+      }
+    },
+    {
+      "tag": "main_path",
+      "components": {
+        "Transform": { "position": [0, 252] },
+        "Rect": { "width": 800, "height": 82, "color": "#b8a777" }
+      }
+    },
+    {
+      "tag": "north_path",
+      "components": {
+        "Transform": { "position": [344, 136] },
+        "Rect": { "width": 98, "height": 164, "color": "#a99767" }
+      }
+    },
+    {
       "tag": "player",
       "components": {
-        "Transform": { "position": [96, 208] },
+        "Transform": { "position": [96, 238] },
         "Sprite": { "texture": "reference-game/player.png" },
-        "PlayerController": { "speed": 115 }
+        "PlayerController": { "speed": 125 }
       }
     },
     {
-      "tag": "path",
+      "tag": "left_marker",
       "components": {
-        "Transform": { "position": [0, 260] },
-        "Rect": { "width": 800, "height": 74, "color": "#d9d0a3" }
+        "Transform": { "position": [182, 238] },
+        "Circle": { "radius": 9, "color": "#f7c95f" }
       }
     },
     {
-      "tag": "stone",
+      "tag": "center_marker",
       "components": {
-        "Transform": { "position": [548, 205] },
-        "Rect": { "width": 70, "height": 64, "color": "#7a7f87" }
+        "Transform": { "position": [332, 232] },
+        "Circle": { "radius": 10, "color": "#ffd977" }
       }
     },
     {
-      "tag": "stone_glow",
+      "tag": "right_marker",
       "components": {
-        "Transform": { "position": [582, 200] },
-        "Circle": { "radius": 8, "color": "#f7d96b" }
+        "Transform": { "position": [492, 238] },
+        "Circle": { "radius": 9, "color": "#f7c95f" }
+      }
+    },
+    {
+      "tag": "waystone_shadow",
+      "components": {
+        "Transform": { "position": [570, 215] },
+        "Rect": { "width": 92, "height": 74, "color": "#233139" }
+      }
+    },
+    {
+      "tag": "waystone",
+      "components": {
+        "Transform": { "position": [548, 196] },
+        "Rect": { "width": 72, "height": 76, "color": "#6c7481" }
+      }
+    },
+    {
+      "tag": "waystone_core",
+      "components": {
+        "Transform": { "position": [584, 213] },
+        "Circle": { "radius": 16, "color": "#ffe28a" }
+      }
+    },
+    {
+      "tag": "gate_hint",
+      "components": {
+        "Transform": { "position": [704, 184] },
+        "Rect": { "width": 50, "height": 120, "color": "#315d68" }
       }
     },
     {
       "tag": "stone_trigger",
       "components": {
         "Trigger": {
-          "bounds": [520, 180, 130, 120],
+          "bounds": [510, 170, 152, 132],
           "oneShot": true,
           "action": { "setFlag": { "name": "stone_touched", "value": true } }
         }
