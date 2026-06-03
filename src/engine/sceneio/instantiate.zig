@@ -94,6 +94,54 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
         .PlayerController => |pc| {
             try scene.world.player_controllers.set(scene.world.allocator, entity, .{ .speed = pc.speed, .paused = false });
         },
+        .Solid => |solid| {
+            try scene.world.solids.set(scene.world.allocator, entity, .{ .enabled = solid.enabled });
+        },
+        .Animation => |anim| {
+            const clips = try scene.world.allocator.alloc(ecs.AnimationClip, anim.clips.len);
+            for (anim.clips, 0..) |clip, i| {
+                clips[i] = ecs.AnimationClip.init(clip.name, clip.start, clip.frames, clip.fps, clip.loop);
+            }
+            try scene.world.animation_states.set(scene.world.allocator, entity, .{ .clips = clips });
+            if (anim.current) |name| {
+                if (scene.world.tags.get(entity)) |tag| {
+                    _ = ecs.Systems.setAnimation(&scene.world, tag.get(), name);
+                }
+            } else if (anim.clips.len > 0) {
+                if (scene.world.sprite_renderers.get(entity)) |sr| {
+                    sr.start_frame = anim.clips[0].start;
+                    sr.current_frame = anim.clips[0].start;
+                    sr.frames = anim.clips[0].frames;
+                    sr.fps = anim.clips[0].fps;
+                    sr.loop = anim.clips[0].loop;
+                }
+            }
+        },
+        .Tilemap => |tm| {
+            try scene.world.tilemaps.set(scene.world.allocator, entity, .{
+                .columns = tm.columns,
+                .rows = tm.rows,
+                .tile_width = tm.tile_width,
+                .tile_height = tm.tile_height,
+                .tiles = tm.tiles,
+                .solid_tiles = tm.solid_tiles,
+                .palette = tm.palette,
+            });
+        },
+        .ParticleEmitter => |pe| {
+            try scene.world.particle_emitters.set(scene.world.allocator, entity, .{
+                .color = pe.color,
+                .rate = pe.rate,
+                .lifetime = pe.lifetime,
+                .speed = pe.speed,
+                .spread = pe.spread,
+                .radius = pe.radius,
+                .burst = pe.burst,
+            });
+        },
+        .Tween => |tw| {
+            try scene.world.tweens.set(scene.world.allocator, entity, .{ .to = tw.to, .duration = tw.duration, .loop = tw.loop });
+        },
         .Camera => |c| {
             // follow_target resolved in pass2.
             try scene.world.cameras.set(scene.world.allocator, entity, .{ .offset = c.offset, .target = .{ .x = 0, .y = 0 }, .rotation = c.rotation, .zoom = c.zoom, .follow_target = ecs.Entity.INVALID });
@@ -124,6 +172,13 @@ fn applyComponentPass2(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
                 cam.follow_target = target;
             }
         },
+        .Animation => |anim| {
+            if (anim.current) |name| {
+                if (scene.world.tags.get(entity)) |tag| {
+                    _ = ecs.Systems.setAnimation(&scene.world, tag.get(), name);
+                }
+            }
+        },
         else => {},
     }
 }
@@ -133,7 +188,7 @@ fn lowerTriggerAction(action: types.TriggerActionIR, dialogue: DialogueBindings)
         .ShowMessage => |sm| ecs.TriggerShowMessage(sm.text, sm.duration),
         .StartDialogue => |sd| blk: {
             const runner_ptr: *anyopaque = dialogue.game;
-            break :blk ecs.TriggerDialogueStart(@ptrCast(@alignCast(runner_ptr)), null, sd.label);
+            break :blk ecs.TriggerDialogueStart(@ptrCast(@alignCast(runner_ptr)), null, sd.id, sd.label);
         },
         .ChangeScene => |cs| blk: {
             if (cs.index) |idx| break :blk .{ .change_scene = .{ .index = idx, .use_index = true } };

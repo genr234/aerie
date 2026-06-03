@@ -16,7 +16,57 @@ Aerie projects are folders with a `game.json` manifest.
 }
 ```
 
-Scenes live under `assets/scenes/` and contain entities with components such as `Transform`, `Sprite`, `Camera`, `PlayerController`, and `Trigger`.
+Scenes live under `assets/scenes/` and contain entities with components such as `Transform`, `Sprite`, `Camera`, `PlayerController`, `Solid`, `Tilemap`, `Animation`, `ParticleEmitter`, `Tween`, and `Trigger`.
+
+Gameplay-oriented components are intentionally small and data-first:
+
+```json
+{
+  "tag": "wall",
+  "components": {
+    "Transform": { "position": [160, 220] },
+    "Rect": { "width": 80, "height": 24, "color": "#53606a" },
+    "Solid": { "enabled": true }
+  }
+}
+```
+
+Tilemaps use numeric tile ids. `0` is empty, palette entries color tile ids starting at `1`, and `solidTiles` marks ids that block player movement.
+
+```json
+{
+  "tag": "ground",
+  "components": {
+    "Transform": { "position": [0, 0] },
+    "Tilemap": {
+      "columns": 4,
+      "rows": 3,
+      "tileWidth": 16,
+      "tileHeight": 16,
+      "tiles": [1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1],
+      "solidTiles": [1],
+      "palette": ["#5f8f5f"]
+    }
+  }
+}
+```
+
+Named sprite animations are declared beside `Sprite`. Each clip selects a frame range from the sprite sheet.
+
+```json
+{
+  "Sprite": { "texture": "hero.png", "frameWidth": 32, "frameHeight": 32 },
+  "Animation": {
+    "current": "idle",
+    "clips": [
+      { "name": "idle", "start": 0, "frames": 4, "fps": 6, "loop": true },
+      { "name": "run", "start": 4, "frames": 6, "fps": 12, "loop": true }
+    ]
+  }
+}
+```
+
+`ParticleEmitter` adds lightweight visual effects, and `Tween` moves an entity toward a target position over time.
 
 Dialogue assets live under `assets/dialogues/`. The v1 editor format is data-driven:
 

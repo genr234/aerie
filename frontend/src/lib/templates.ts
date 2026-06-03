@@ -279,6 +279,7 @@ import { writeScene } from './project';
             components: {
               Transform: { position: [512, 178] },
               Rect: { width: 42, height: 96, color: "#5f6872" },
+              Solid: { enabled: true },
             },
           },
           {
@@ -286,6 +287,14 @@ import { writeScene } from './project';
             components: {
               Transform: { position: [533, 174] },
               Circle: { radius: 14, color: "#ffd56f" },
+              ParticleEmitter: {
+                color: "#ffd56f",
+                rate: 3,
+                lifetime: 0.8,
+                speed: 18,
+                spread: 6.28,
+                radius: 2,
+              },
             },
           },
         ],
@@ -447,16 +456,28 @@ class Game {
 
   export function blankScript(): string {
     return `import "engine/api" for Events, State, Scene, UI, Save
+import "engine/api" for Inventory, Quest, Combat, Entity, CameraFx
 
 class Game {
   static onBoot() {
     Events.message("Your story starts here.", 3)
+    Inventory.add("spark", 1)
+    Quest.start("first_steps")
+    Combat.setHp("signal", 3)
   }
 
-  static onUpdate(dt) {}
+  static onUpdate(dt) {
+    if (Inventory.has("spark", 1) && !Quest.isComplete("first_steps")) {
+      Combat.damage("signal", 1)
+      Entity.emitParticles("signal_light", 8)
+      CameraFx.shake(3, 0.15)
+      Quest.complete("first_steps")
+    }
+  }
 
   static onDraw() {
-    UI.text(18, 18, "Start")
+    var hp = Combat.hp("signal")
+    UI.text(18, 18, "Start | signal hp: %(hp)")
   }
 }
 `;

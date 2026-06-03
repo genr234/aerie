@@ -210,6 +210,26 @@ pub const Loader = struct {
         \\  foreign static entitySetActive(tag, active)
         \\  foreign static entityGetPosition(tag)
         \\  foreign static entitySetPosition(tag, x, y)
+        \\  foreign static entityMove(tag, dx, dy)
+        \\  foreign static entityDespawn(tag)
+        \\  foreign static entitySpawnRect(tag, x, y, w, h, color)
+        \\  foreign static entitySpawnCircle(tag, x, y, radius, color)
+        \\  foreign static entitySetAnimation(tag, name)
+        \\  foreign static entityTweenTo(tag, x, y, duration)
+        \\  foreign static entityEmitParticles(tag, count)
+        \\  foreign static cameraShake(intensity, duration)
+        \\
+        \\  foreign static inventoryAdd(item, amount)
+        \\  foreign static inventoryCount(item)
+        \\  foreign static inventoryHas(item, amount)
+        \\  foreign static questStart(id)
+        \\  foreign static questComplete(id)
+        \\  foreign static questIsActive(id)
+        \\  foreign static questIsComplete(id)
+        \\  foreign static combatSetHp(actor, hp)
+        \\  foreign static combatDamage(actor, amount)
+        \\  foreign static combatHeal(actor, amount)
+        \\  foreign static combatHp(actor)
         \\  foreign static onKeyPressed(key, callback)
         \\  foreign static onKeyReleased(key, callback)
         \\  foreign static onAnyKey(callback)
@@ -308,6 +328,37 @@ pub const Loader = struct {
         \\  static setActive(tag, active) { Engine.entitySetActive(tag, active) }
         \\  static getPosition(tag) { Engine.entityGetPosition(tag) }
         \\  static setPosition(tag, x, y) { Engine.entitySetPosition(tag, x, y) }
+        \\  static move(tag, dx, dy) { Engine.entityMove(tag, dx, dy) }
+        \\  static despawn(tag) { Engine.entityDespawn(tag) }
+        \\  static spawnRect(tag, x, y, w, h, color) { Engine.entitySpawnRect(tag, x, y, w, h, color) }
+        \\  static spawnCircle(tag, x, y, radius, color) { Engine.entitySpawnCircle(tag, x, y, radius, color) }
+        \\  static setAnimation(tag, name) { Engine.entitySetAnimation(tag, name) }
+        \\  static tweenTo(tag, x, y, duration) { Engine.entityTweenTo(tag, x, y, duration) }
+        \\  static emitParticles(tag, count) { Engine.entityEmitParticles(tag, count) }
+        \\}
+        \\
+        \\class CameraFx {
+        \\  static shake(intensity, duration) { Engine.cameraShake(intensity, duration) }
+        \\}
+        \\
+        \\class Inventory {
+        \\  static add(item, amount) { Engine.inventoryAdd(item, amount) }
+        \\  static count(item) { Engine.inventoryCount(item) }
+        \\  static has(item, amount) { Engine.inventoryHas(item, amount) }
+        \\}
+        \\
+        \\class Quest {
+        \\  static start(id) { Engine.questStart(id) }
+        \\  static complete(id) { Engine.questComplete(id) }
+        \\  static isActive(id) { Engine.questIsActive(id) }
+        \\  static isComplete(id) { Engine.questIsComplete(id) }
+        \\}
+        \\
+        \\class Combat {
+        \\  static setHp(actor, hp) { Engine.combatSetHp(actor, hp) }
+        \\  static damage(actor, amount) { Engine.combatDamage(actor, amount) }
+        \\  static heal(actor, amount) { Engine.combatHeal(actor, amount) }
+        \\  static hp(actor) { Engine.combatHp(actor) }
         \\}
         \\
         \\class Input {

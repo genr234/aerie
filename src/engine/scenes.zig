@@ -223,7 +223,9 @@ pub const Scene = struct {
     pub fn runSystems(self: *Self, dt: f32, paused: bool) void {
         ecs.Systems.setPlayerPaused(&self.world, paused);
         ecs.Systems.playerMovement(&self.world, dt);
+        ecs.Systems.tweenUpdate(&self.world, dt);
         ecs.Systems.spriteAnimation(&self.world, dt);
+        ecs.Systems.particlesUpdate(&self.world, dt);
         ecs.Systems.cameraFollow(&self.world);
         ecs.Systems.triggerCheck(&self.world);
         ecs.Systems.processEvents(&self.world, dt);

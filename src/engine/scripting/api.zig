@@ -6,6 +6,8 @@ const events = @import("../events.zig");
 const story = @import("../story.zig");
 const ui = @import("../ui.zig");
 const resources = @import("../resources.zig");
+const ecs = @import("../ecs.zig");
+const rl = @import("raylib");
 
 const context = @import("context.zig");
 const runtime_mod = @import("runtime.zig");
@@ -70,6 +72,25 @@ pub const Api = struct {
         .{ "entitySetActive(_,_)", &entity_setActive },
         .{ "entityGetPosition(_)", &entity_getPosition },
         .{ "entitySetPosition(_,_,_)", &entity_setPosition },
+        .{ "entityMove(_,_,_)", &entity_move },
+        .{ "entityDespawn(_)", &entity_despawn },
+        .{ "entitySpawnRect(_,_,_,_,_,_)", &entity_spawnRect },
+        .{ "entitySpawnCircle(_,_,_,_,_)", &entity_spawnCircle },
+        .{ "entitySetAnimation(_,_)", &entity_setAnimation },
+        .{ "entityTweenTo(_,_,_,_)", &entity_tweenTo },
+        .{ "entityEmitParticles(_,_)", &entity_emitParticles },
+        .{ "cameraShake(_,_)", &camera_shake },
+        .{ "inventoryAdd(_,_)", &inventory_add },
+        .{ "inventoryCount(_)", &inventory_count },
+        .{ "inventoryHas(_,_)", &inventory_has },
+        .{ "questStart(_)", &quest_start },
+        .{ "questComplete(_)", &quest_complete },
+        .{ "questIsActive(_)", &quest_isActive },
+        .{ "questIsComplete(_)", &quest_isComplete },
+        .{ "combatSetHp(_,_)", &combat_setHp },
+        .{ "combatDamage(_,_)", &combat_damage },
+        .{ "combatHeal(_,_)", &combat_heal },
+        .{ "combatHp(_)", &combat_hp },
         .{ "onKeyPressed(_,_)", &input_onKeyPressed },
         .{ "onKeyReleased(_,_)", &input_onKeyReleased },
         .{ "onAnyKey(_)", &input_onAnyKey },
@@ -635,11 +656,7 @@ pub const Api = struct {
 
         var ctx = getCtx(vm);
         const runner: *dialogue.Runner = ctx.activeDialogue();
-        if (std.mem.eql(u8, id, runner.script.id)) {
-            ctx.eventQueue.push(events.startDialogue(runner, ctx.storyState)) catch {};
-        } else {
-            ctx.eventQueue.push(events.startDialogueAt(runner, ctx.storyState, id)) catch {};
-        }
+        ctx.eventQueue.push(events.startDialogueById(runner, ctx.storyState, id, null)) catch {};
     }
 
     fn dialogue_stop(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -723,6 +740,254 @@ pub const Api = struct {
             }
         }
         wren_c.c.wrenSetSlotBool(vm, 0, false);
+    }
+
+    fn entity_move(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const dx = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const dy = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        if (scene.world.findByTag(tag)) |entity| {
+            if (scene.world.transforms.get(entity)) |tr| {
+                tr.position.x += dx;
+                tr.position.y += dy;
+                wren_c.c.wrenSetSlotBool(vm, 0, true);
+                return;
+            }
+        }
+        wren_c.c.wrenSetSlotBool(vm, 0, false);
+    }
+
+    fn entity_despawn(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        if (scene.world.findByTag(tag)) |entity| {
+            scene.world.despawn(entity);
+            wren_c.c.wrenSetSlotBool(vm, 0, true);
+            return;
+        }
+        wren_c.c.wrenSetSlotBool(vm, 0, false);
+    }
+
+    fn entity_spawnRect(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        var color_buf: [32]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const width = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const height = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 5)));
+        const color_name = getSlotString(vm, 6, &color_buf);
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        var builder = scene.entity();
+        _ = builder.withTag(tag).withTransform(.{ .x = x, .y = y }).withRect(width, height, parseApiColor(color_name)).withBoxCollider(width, height);
+        _ = builder.build();
+        wren_c.c.wrenSetSlotBool(vm, 0, true);
+    }
+
+    fn entity_spawnCircle(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        var color_buf: [32]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const radius = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const color_name = getSlotString(vm, 5, &color_buf);
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        var builder = scene.entity();
+        _ = builder.withTag(tag).withTransform(.{ .x = x, .y = y }).withCircle(radius, parseApiColor(color_name));
+        _ = builder.build();
+        wren_c.c.wrenSetSlotBool(vm, 0, true);
+    }
+
+    fn entity_setAnimation(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        var name_buf: [32]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const name = getSlotString(vm, 2, &name_buf);
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        wren_c.c.wrenSetSlotBool(vm, 0, ecs.Systems.setAnimation(&scene.world, tag, name));
+    }
+
+    fn entity_tweenTo(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const x = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const y = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 3)));
+        const duration = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 4)));
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        if (scene.world.findByTag(tag)) |entity| {
+            scene.world.tweens.set(scene.world.allocator, entity, .{ .to = .{ .x = x, .y = y }, .duration = duration }) catch {};
+            wren_c.c.wrenSetSlotBool(vm, 0, true);
+            return;
+        }
+        wren_c.c.wrenSetSlotBool(vm, 0, false);
+    }
+
+    fn entity_emitParticles(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var tag_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const tag = getSlotString(vm, 1, &tag_buf);
+        const count = @as(usize, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        if (scene.world.findByTag(tag)) |entity| {
+            if (scene.world.particle_emitters.get(entity)) |emitter| {
+                emitter.burst += count;
+                wren_c.c.wrenSetSlotBool(vm, 0, true);
+                return;
+            }
+        }
+        wren_c.c.wrenSetSlotBool(vm, 0, false);
+    }
+
+    fn camera_shake(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const intensity = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+        const duration = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        const ctx = getCtx(vm);
+        const scene = ctx.sceneManager.currentScene();
+        ecs.Systems.shakeCamera(&scene.world, intensity, duration);
+    }
+
+    fn inventory_add(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var item_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const item = getSlotString(vm, 1, &item_buf);
+        const amount = @as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "inv.{s}", .{item}) catch return;
+        getCtx(vm).storyState.addInt(key, amount);
+    }
+
+    fn inventory_count(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var item_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const item = getSlotString(vm, 1, &item_buf);
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "inv.{s}", .{item}) catch {
+            wren_c.c.wrenSetSlotDouble(vm, 0, 0);
+            return;
+        };
+        wren_c.c.wrenSetSlotDouble(vm, 0, @floatFromInt(getCtx(vm).storyState.getInt(key)));
+    }
+
+    fn inventory_has(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var item_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const item = getSlotString(vm, 1, &item_buf);
+        const amount = @as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "inv.{s}", .{item}) catch {
+            wren_c.c.wrenSetSlotBool(vm, 0, false);
+            return;
+        };
+        wren_c.c.wrenSetSlotBool(vm, 0, getCtx(vm).storyState.getInt(key) >= amount);
+    }
+
+    fn quest_start(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        setQuestState(vm, "active");
+    }
+
+    fn quest_complete(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        setQuestState(vm, "complete");
+    }
+
+    fn quest_isActive(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        wren_c.c.wrenSetSlotBool(vm, 0, questStateEquals(vm, "active"));
+    }
+
+    fn quest_isComplete(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        wren_c.c.wrenSetSlotBool(vm, 0, questStateEquals(vm, "complete"));
+    }
+
+    fn combat_setHp(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const actor = getSlotString(vm, 1, &actor_buf);
+        const hp = @as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2)));
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch return;
+        getCtx(vm).storyState.setInt(key, hp);
+    }
+
+    fn combat_damage(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        modifyCombatHp(vm, -@as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2))));
+    }
+
+    fn combat_heal(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        modifyCombatHp(vm, @as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2))));
+    }
+
+    fn combat_hp(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const actor = getSlotString(vm, 1, &actor_buf);
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch {
+            wren_c.c.wrenSetSlotDouble(vm, 0, 0);
+            return;
+        };
+        wren_c.c.wrenSetSlotDouble(vm, 0, @floatFromInt(getCtx(vm).storyState.getInt(key)));
+    }
+
+    fn setQuestState(vm: *wren_c.c.WrenVM, value: []const u8) void {
+        var quest_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const quest = getSlotString(vm, 1, &quest_buf);
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "quest.{s}", .{quest}) catch return;
+        getCtx(vm).storyState.setString(key, value);
+    }
+
+    fn questStateEquals(vm: *wren_c.c.WrenVM, value: []const u8) bool {
+        var quest_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const quest = getSlotString(vm, 1, &quest_buf);
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "quest.{s}", .{quest}) catch return false;
+        return std.mem.eql(u8, getCtx(vm).storyState.getString(key), value);
+    }
+
+    fn modifyCombatHp(vm: *wren_c.c.WrenVM, delta: i32) void {
+        var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const actor = getSlotString(vm, 1, &actor_buf);
+        var key_buf: [64]u8 = undefined;
+        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch return;
+        getCtx(vm).storyState.addInt(key, delta);
+    }
+
+    fn parseApiColor(value: []const u8) rl.Color {
+        if (std.ascii.eqlIgnoreCase(value, "red")) return rl.Color.red;
+        if (std.ascii.eqlIgnoreCase(value, "green")) return rl.Color.green;
+        if (std.ascii.eqlIgnoreCase(value, "blue")) return rl.Color.blue;
+        if (std.ascii.eqlIgnoreCase(value, "black")) return rl.Color.black;
+        if (std.ascii.eqlIgnoreCase(value, "white")) return rl.Color.white;
+        if (value.len == 7 and value[0] == '#') {
+            const r = std.fmt.parseInt(u8, value[1..3], 16) catch return rl.Color.white;
+            const g = std.fmt.parseInt(u8, value[3..5], 16) catch return rl.Color.white;
+            const b = std.fmt.parseInt(u8, value[5..7], 16) catch return rl.Color.white;
+            return .{ .r = r, .g = g, .b = b, .a = 255 };
+        }
+        return rl.Color.white;
     }
 
     fn input_onKeyPressed(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {

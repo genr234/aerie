@@ -353,16 +353,28 @@ pub const Runner = struct {
         self.context = ctx;
         self.index = if (self.script.start) |label| self.script.findLabel(label) orelse 0 else 0;
         self.phase = .inactive;
-        self.enterNode();
         self.emit(.started);
+        self.enterNode();
     }
 
     pub fn startAt(self: *Runner, ctx: ?*anyopaque, label: []const u8) void {
         self.context = ctx;
         self.index = self.script.findLabel(label) orelse 0;
         self.phase = .inactive;
-        self.enterNode();
         self.emit(.started);
+        self.enterNode();
+    }
+
+    pub fn startDialogue(self: *Runner, ctx: ?*anyopaque, id: ?[]const u8, label: ?[]const u8) bool {
+        if (id) |dialogue_id| {
+            if (!std.mem.eql(u8, dialogue_id, self.script.id)) return false;
+        }
+        if (label) |target| {
+            self.startAt(ctx, target);
+        } else {
+            self.start(ctx);
+        }
+        return true;
     }
 
     pub fn stop(self: *Runner) void {
@@ -505,7 +517,7 @@ pub const Runner = struct {
     }
 
     fn finishTyping(self: *Runner, node: Node) void {
-        self.phase = if (node.tag == .ask) .choosing else .waiting;
+        self.phase = if (node.tag == .ask and self.available.items.len > 0) .choosing else .waiting;
         self.emit(.typing_complete);
     }
 
@@ -645,12 +657,7 @@ pub fn draw(runner: *const Runner, bounds: rl.Rectangle, style: Style) void {
         const total_h = @as(f32, @floatFromInt(runner.available.items.len)) * item_h + style.padding;
         const panel_w = @as(f32, @floatFromInt(max_w)) + style.padding * 4;
 
-        choice_rect = rl.Rectangle{
-            .x = (bounds.x + bounds.width) - panel_w - 10,
-            .y = bounds.y - total_h + style.border_thick,
-            .width = panel_w,
-            .height = total_h
-        };
+        choice_rect = rl.Rectangle{ .x = (bounds.x + bounds.width) - panel_w - 10, .y = bounds.y - total_h + style.border_thick, .width = panel_w, .height = total_h };
     }
     if (has_speaker) {
         drawAttachedTab(name_rect, style);
@@ -663,29 +670,24 @@ pub fn draw(runner: *const Runner, bounds: rl.Rectangle, style: Style) void {
     drawMainBox(bounds, style);
 
     if (has_speaker) {
-        drawTextEx(node.speaker, name_rect.x + style.padding * 1.5, name_rect.y + style.padding/2, style.font_size, style.border_color);
+        drawTextEx(node.speaker, name_rect.x + style.padding * 1.5, name_rect.y + style.padding / 2, style.font_size, style.border_color);
     }
 
     drawTextEx(runner.displayText(), bounds.x + style.padding, bounds.y + style.padding, style.font_size, style.text_color);
 
     if (is_choosing) {
-        var current_y = choice_rect.y + style.padding/2;
+        var current_y = choice_rect.y + style.padding / 2;
 
         for (runner.available.items, 0..) |opt_idx, i| {
             const is_sel = (i == runner.choice_idx);
 
             if (is_sel) {
-                const pill = rl.Rectangle{
-                    .x = choice_rect.x + style.padding/2,
-                    .y = current_y,
-                    .width = choice_rect.width - style.padding,
-                    .height = item_h
-                };
+                const pill = rl.Rectangle{ .x = choice_rect.x + style.padding / 2, .y = current_y, .width = choice_rect.width - style.padding, .height = item_h };
                 rl.drawRectangleRounded(pill, 0.3, 4, style.highlight_bg);
             }
 
             const col = if (is_sel) style.highlight_text else style.sub_text_color;
-            drawTextEx(node.options[opt_idx].text, choice_rect.x + style.padding * 1.5, current_y + style.padding/2, style.font_size, col);
+            drawTextEx(node.options[opt_idx].text, choice_rect.x + style.padding * 1.5, current_y + style.padding / 2, style.font_size, col);
 
             current_y += item_h;
         }
@@ -693,52 +695,29 @@ pub fn draw(runner: *const Runner, bounds: rl.Rectangle, style: Style) void {
 
     if (node.tag == .input) {
         const field_y = bounds.y + bounds.height - style.padding * 3;
-        rl.drawRectangleRounded(
-            .{ .x = bounds.x + style.padding, .y = field_y, .width = bounds.width - style.padding*2, .height = style.padding * 2 },
-            0.2, 4, rl.Color{ .r=0, .g=0, .b=0, .a=60 }
-        );
-        drawTextEx(runner.inputText(), bounds.x + style.padding * 2, field_y + style.padding/2, style.font_size, style.text_color);
+        rl.drawRectangleRounded(.{ .x = bounds.x + style.padding, .y = field_y, .width = bounds.width - style.padding * 2, .height = style.padding * 2 }, 0.2, 4, rl.Color{ .r = 0, .g = 0, .b = 0, .a = 60 });
+        drawTextEx(runner.inputText(), bounds.x + style.padding * 2, field_y + style.padding / 2, style.font_size, style.text_color);
         if (@mod(@as(i32, @intFromFloat(rl.getTime() * 2)), 2) == 0) {
             const txt_w = measureText(runner.inputText(), style.font_size);
-            rl.drawRectangle(
-                @intFromFloat(bounds.x + style.padding * 2 + @as(f32, @floatFromInt(txt_w)) + 2),
-                @intFromFloat(field_y + style.padding/2),
-                2, style.font_size, style.border_color
-            );
+            rl.drawRectangle(@intFromFloat(bounds.x + style.padding * 2 + @as(f32, @floatFromInt(txt_w)) + 2), @intFromFloat(field_y + style.padding / 2), 2, style.font_size, style.border_color);
         }
     }
 }
 
-
 fn drawMainBox(rect: rl.Rectangle, style: Style) void {
-    rl.drawRectangleRounded(
-        .{ .x = rect.x + 4, .y = rect.y + 4, .width = rect.width, .height = rect.height },
-        style.roundness, style.segments, rl.Color{ .r=0, .g=0, .b=0, .a=100 }
-    );
+    rl.drawRectangleRounded(.{ .x = rect.x + 4, .y = rect.y + 4, .width = rect.width, .height = rect.height }, style.roundness, style.segments, rl.Color{ .r = 0, .g = 0, .b = 0, .a = 100 });
     rl.drawRectangleRounded(rect, style.roundness, style.segments, style.border_color);
-    const inner = rl.Rectangle{
-        .x = rect.x + style.border_thick, .y = rect.y + style.border_thick,
-        .width = rect.width - style.border_thick*2, .height = rect.height - style.border_thick*2
-    };
+    const inner = rl.Rectangle{ .x = rect.x + style.border_thick, .y = rect.y + style.border_thick, .width = rect.width - style.border_thick * 2, .height = rect.height - style.border_thick * 2 };
     rl.drawRectangleRounded(inner, style.roundness, style.segments, style.bg_color);
 }
 
 fn drawAttachedTab(rect: rl.Rectangle, style: Style) void {
     rl.drawRectangleRounded(rect, style.roundness, style.segments, style.border_color);
 
-    const inner = rl.Rectangle{
-        .x = rect.x + style.border_thick, .y = rect.y + style.border_thick,
-        .width = rect.width - style.border_thick*2, .height = rect.height - style.border_thick*2
-    };
+    const inner = rl.Rectangle{ .x = rect.x + style.border_thick, .y = rect.y + style.border_thick, .width = rect.width - style.border_thick * 2, .height = rect.height - style.border_thick * 2 };
     rl.drawRectangleRounded(inner, style.roundness, style.segments, style.bg_color);
 
-    rl.drawRectangle(
-        @intFromFloat(rect.x + style.border_thick),
-        @intFromFloat(rect.y + rect.height - style.border_thick * 2),
-        @intFromFloat(rect.width - style.border_thick * 2),
-        @intFromFloat(style.border_thick * 2),
-        style.bg_color
-    );
+    rl.drawRectangle(@intFromFloat(rect.x + style.border_thick), @intFromFloat(rect.y + rect.height - style.border_thick * 2), @intFromFloat(rect.width - style.border_thick * 2), @intFromFloat(style.border_thick * 2), style.bg_color);
 }
 
 fn drawTextEx(text: []const u8, x: f32, y: f32, size: i32, color: rl.Color) void {

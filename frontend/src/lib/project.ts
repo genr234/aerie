@@ -1,7 +1,20 @@
 import type { Diagnostic, DialogueDocument, ProjectConfig, SceneDocument, Vfs } from './types';
 import { normalizePath, readText } from './vfs';
 
-export const COMPONENTS = ['Transform', 'Sprite', 'Circle', 'Rect', 'Camera', 'PlayerController', 'Trigger'];
+export const COMPONENTS = [
+  'Transform',
+  'Sprite',
+  'Circle',
+  'Rect',
+  'Camera',
+  'PlayerController',
+  'Solid',
+  'Animation',
+  'Tilemap',
+  'ParticleEmitter',
+  'Tween',
+  'Trigger',
+];
 
 export function parseProject(vfs: Vfs): { project?: ProjectConfig; diagnostics: Diagnostic[] } {
   const text = readText(vfs, 'game.json');
@@ -260,6 +273,39 @@ function validateComponentShape(path: string, index: number, components: Record<
   const controller = record(components.PlayerController);
   if (controller && controller.speed !== undefined && !num(controller.speed)) {
     out.push({ severity: 'error', path, message: `entities[${index}].PlayerController.speed must be a number` });
+  }
+
+  const solid = record(components.Solid);
+  if (solid && solid.enabled !== undefined && typeof solid.enabled !== 'boolean') {
+    out.push({ severity: 'error', path, message: `entities[${index}].Solid.enabled must be a boolean` });
+  }
+
+  const animation = record(components.Animation);
+  if (animation) {
+    if (animation.current !== undefined && typeof animation.current !== 'string') out.push({ severity: 'error', path, message: `entities[${index}].Animation.current must be a string` });
+    if (animation.clips !== undefined && !Array.isArray(animation.clips)) out.push({ severity: 'error', path, message: `entities[${index}].Animation.clips must be an array` });
+  }
+
+  const tilemap = record(components.Tilemap);
+  if (tilemap) {
+    if (!num(tilemap.columns) || !num(tilemap.rows) || !Array.isArray(tilemap.tiles)) out.push({ severity: 'error', path, message: `entities[${index}].Tilemap needs columns, rows, and tiles` });
+    if (tilemap.tileWidth !== undefined && !num(tilemap.tileWidth)) out.push({ severity: 'error', path, message: `entities[${index}].Tilemap.tileWidth must be a number` });
+    if (tilemap.tileHeight !== undefined && !num(tilemap.tileHeight)) out.push({ severity: 'error', path, message: `entities[${index}].Tilemap.tileHeight must be a number` });
+  }
+
+  const emitter = record(components.ParticleEmitter);
+  if (emitter) {
+    if (emitter.color !== undefined && !validColor(emitter.color)) out.push({ severity: 'error', path, message: `entities[${index}].ParticleEmitter.color must be #RRGGBB or #RRGGBBAA` });
+    for (const key of ['rate', 'lifetime', 'speed', 'spread', 'radius', 'burst']) {
+      if (emitter[key] !== undefined && !num(emitter[key])) out.push({ severity: 'error', path, message: `entities[${index}].ParticleEmitter.${key} must be a number` });
+    }
+  }
+
+  const tween = record(components.Tween);
+  if (tween) {
+    if (!vec(tween.to, 2)) out.push({ severity: 'error', path, message: `entities[${index}].Tween.to must be [x, y]` });
+    if (tween.duration !== undefined && !num(tween.duration)) out.push({ severity: 'error', path, message: `entities[${index}].Tween.duration must be a number` });
+    if (tween.loop !== undefined && typeof tween.loop !== 'boolean') out.push({ severity: 'error', path, message: `entities[${index}].Tween.loop must be a boolean` });
   }
 
   const trigger = record(components.Trigger);

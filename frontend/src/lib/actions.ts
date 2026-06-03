@@ -762,6 +762,11 @@ function defaultComponent(name: string): Record<string, unknown> {
     case "Rect": return { width: 64, height: 48, color: "#ffffff" };
     case "Camera": return { offset: [400, 225], zoom: 1 };
     case "PlayerController": return { speed: 100 };
+    case "Solid": return { enabled: true };
+    case "Animation": return { current: "idle", clips: [{ name: "idle", start: 0, frames: 1, fps: 1, loop: true }] };
+    case "Tilemap": return { columns: 8, rows: 6, tileWidth: 16, tileHeight: 16, tiles: Array(48).fill(0), solidTiles: [1], palette: ["#5f8f5f"] };
+    case "ParticleEmitter": return { color: "#ffffff", rate: 0, lifetime: 0.6, speed: 40, spread: 6.28, radius: 2, burst: 12 };
+    case "Tween": return { to: [128, 128], duration: 1, loop: false };
     case "Trigger": return { bounds: [0, 0, 80, 80], oneShot: false, action: { showMessage: { text: "Hello", duration: 2 } } };
     default: return {};
   }

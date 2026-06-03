@@ -27,6 +27,11 @@ pub const ComponentIR = union(enum) {
     Rect: RectIR,
     Camera: CameraIR,
     PlayerController: PlayerControllerIR,
+    Solid: SolidIR,
+    Animation: AnimationIR,
+    Tilemap: TilemapIR,
+    ParticleEmitter: ParticleEmitterIR,
+    Tween: TweenIR,
     Trigger: TriggerIR,
 };
 
@@ -67,6 +72,49 @@ pub const CameraIR = struct {
 
 pub const PlayerControllerIR = struct {
     speed: f32 = 100,
+};
+
+pub const SolidIR = struct {
+    enabled: bool = true,
+};
+
+pub const AnimationClipIR = struct {
+    name: []const u8,
+    start: usize = 0,
+    frames: usize = 1,
+    fps: f32 = 8,
+    loop: bool = true,
+};
+
+pub const AnimationIR = struct {
+    current: ?[]const u8 = null,
+    clips: []AnimationClipIR = &.{},
+};
+
+pub const TilemapIR = struct {
+    columns: usize,
+    rows: usize,
+    tile_width: f32 = 16,
+    tile_height: f32 = 16,
+    tiles: []const u8,
+    solid_tiles: []const u8 = &.{},
+    palette: []const rl.Color = &.{},
+};
+
+pub const ParticleEmitterIR = struct {
+    color: rl.Color = rl.Color.white,
+    rate: f32 = 12,
+    lifetime: f32 = 0.6,
+    speed: f32 = 40,
+    spread: f32 = 6.28,
+    radius: f32 = 2,
+    burst: usize = 0,
+};
+
+pub const TweenIR = struct {
+    to: rl.Vector2,
+    duration: f32 = 1,
+    loop: bool = false,
 };
 
 pub const TriggerIR = struct {

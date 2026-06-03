@@ -144,6 +144,26 @@ fn parseComponent(allocator: std.mem.Allocator, key: []const u8, v: std.json.Val
         return .{ .PlayerController = try parsePlayerController(v) };
     }
 
+    if (std.mem.eql(u8, key, "Solid")) {
+        return .{ .Solid = try parseSolid(v) };
+    }
+
+    if (std.mem.eql(u8, key, "Animation")) {
+        return .{ .Animation = try parseAnimation(allocator, v) };
+    }
+
+    if (std.mem.eql(u8, key, "Tilemap")) {
+        return .{ .Tilemap = try parseTilemap(allocator, v) };
+    }
+
+    if (std.mem.eql(u8, key, "ParticleEmitter")) {
+        return .{ .ParticleEmitter = try parseParticleEmitter(v) };
+    }
+
+    if (std.mem.eql(u8, key, "Tween")) {
+        return .{ .Tween = try parseTween(v) };
+    }
+
     if (std.mem.eql(u8, key, "Trigger")) {
         return .{ .Trigger = try parseTrigger(allocator, v) };
     }
@@ -232,6 +252,77 @@ fn parsePlayerController(v: std.json.Value) !types.PlayerControllerIR {
     return out;
 }
 
+fn parseSolid(v: std.json.Value) !types.SolidIR {
+    if (v != .object) return JsonError.InvalidType;
+    var out: types.SolidIR = .{};
+    if (v.object.get("enabled")) |enabled| out.enabled = try asBool(enabled);
+    return out;
+}
+
+fn parseAnimation(allocator: std.mem.Allocator, v: std.json.Value) !types.AnimationIR {
+    if (v != .object) return JsonError.InvalidType;
+    var out: types.AnimationIR = .{};
+    if (v.object.get("current")) |current| out.current = try dupString(allocator, try asString(current));
+
+    if (v.object.get("clips")) |clips_val| {
+        if (clips_val != .array) return JsonError.InvalidType;
+        const items = clips_val.array.items;
+        const clips = try allocator.alloc(types.AnimationClipIR, items.len);
+        for (items, 0..) |item, i| {
+            if (item != .object) return JsonError.InvalidType;
+            const name_val = item.object.get("name") orelse return JsonError.MissingField;
+            var clip = types.AnimationClipIR{ .name = try dupString(allocator, try asString(name_val)) };
+            if (item.object.get("start")) |start| clip.start = @intCast(try asInt(start));
+            if (item.object.get("frames")) |frames| clip.frames = @intCast(try asInt(frames));
+            if (item.object.get("fps")) |fps| clip.fps = @floatCast(try asFloat(fps));
+            if (item.object.get("loop")) |loop| clip.loop = try asBool(loop);
+            clips[i] = clip;
+        }
+        out.clips = clips;
+    }
+    return out;
+}
+
+fn parseTilemap(allocator: std.mem.Allocator, v: std.json.Value) !types.TilemapIR {
+    if (v != .object) return JsonError.InvalidType;
+    const columns_val = v.object.get("columns") orelse return JsonError.MissingField;
+    const rows_val = v.object.get("rows") orelse return JsonError.MissingField;
+    const tiles_val = v.object.get("tiles") orelse return JsonError.MissingField;
+
+    var out = types.TilemapIR{
+        .columns = @intCast(try asInt(columns_val)),
+        .rows = @intCast(try asInt(rows_val)),
+        .tiles = try parseU8Array(allocator, tiles_val),
+    };
+    if (v.object.get("tileWidth")) |tw| out.tile_width = @floatCast(try asFloat(tw));
+    if (v.object.get("tileHeight")) |th| out.tile_height = @floatCast(try asFloat(th));
+    if (v.object.get("solidTiles")) |solid| out.solid_tiles = try parseU8Array(allocator, solid);
+    if (v.object.get("palette")) |palette| out.palette = try parseColorArray(allocator, palette);
+    return out;
+}
+
+fn parseParticleEmitter(v: std.json.Value) !types.ParticleEmitterIR {
+    if (v != .object) return JsonError.InvalidType;
+    var out: types.ParticleEmitterIR = .{};
+    if (v.object.get("color")) |color| out.color = try parseColor(color) orelse return JsonError.InvalidValue;
+    if (v.object.get("rate")) |rate| out.rate = @floatCast(try asFloat(rate));
+    if (v.object.get("lifetime")) |life| out.lifetime = @floatCast(try asFloat(life));
+    if (v.object.get("speed")) |speed| out.speed = @floatCast(try asFloat(speed));
+    if (v.object.get("spread")) |spread| out.spread = @floatCast(try asFloat(spread));
+    if (v.object.get("radius")) |radius| out.radius = @floatCast(try asFloat(radius));
+    if (v.object.get("burst")) |burst| out.burst = @intCast(try asInt(burst));
+    return out;
+}
+
+fn parseTween(v: std.json.Value) !types.TweenIR {
+    if (v != .object) return JsonError.InvalidType;
+    const to_val = v.object.get("to") orelse return JsonError.MissingField;
+    var out = types.TweenIR{ .to = try parseVec2(to_val) };
+    if (v.object.get("duration")) |duration| out.duration = @floatCast(try asFloat(duration));
+    if (v.object.get("loop")) |loop| out.loop = try asBool(loop);
+    return out;
+}
+
 fn parseTrigger(allocator: std.mem.Allocator, v: std.json.Value) !types.TriggerIR {
     if (v != .object) return JsonError.InvalidType;
 
@@ -314,6 +405,26 @@ fn parseColor(v: std.json.Value) !?rl.Color {
     if (types.parseColor(s)) |c| return c;
     if (types.parseColorHex(s)) |c2| return c2;
     return null;
+}
+
+fn parseU8Array(allocator: std.mem.Allocator, v: std.json.Value) ![]const u8 {
+    if (v != .array) return JsonError.InvalidType;
+    const out = try allocator.alloc(u8, v.array.items.len);
+    for (v.array.items, 0..) |item, i| {
+        const n = try asInt(item);
+        if (n < 0 or n > 255) return JsonError.InvalidValue;
+        out[i] = @intCast(n);
+    }
+    return out;
+}
+
+fn parseColorArray(allocator: std.mem.Allocator, v: std.json.Value) ![]const rl.Color {
+    if (v != .array) return JsonError.InvalidType;
+    const out = try allocator.alloc(rl.Color, v.array.items.len);
+    for (v.array.items, 0..) |item, i| {
+        out[i] = try parseColor(item) orelse return JsonError.InvalidValue;
+    }
+    return out;
 }
 
 fn asString(v: std.json.Value) ![]const u8 {

@@ -103,6 +103,8 @@
     const sprite = entity.components?.Sprite as Record<string, any> | undefined;
     const camera = entity.components?.Camera as Record<string, any> | undefined;
     const trigger = entity.components?.Trigger as Record<string, any> | undefined;
+    const tilemap = entity.components?.Tilemap as Record<string, any> | undefined;
+    const solid = entity.components?.Solid as Record<string, any> | undefined;
     const hasPlayer = entity.components?.PlayerController !== undefined;
 
     let visualType = 'empty';
@@ -112,7 +114,16 @@
     let textureName = '';
     let textureUrl: string | undefined;
 
-    if (rect) {
+    if (tilemap) {
+      visualType = 'tilemap';
+      const columns = Number(tilemap.columns) || 1;
+      const rows = Number(tilemap.rows) || 1;
+      const tileWidth = Number(tilemap.tileWidth) || 16;
+      const tileHeight = Number(tilemap.tileHeight) || 16;
+      width = columns * tileWidth;
+      height = rows * tileHeight;
+      color = String((tilemap.palette as string[] | undefined)?.[0] ?? '#5f8f5f');
+    } else if (rect) {
       visualType = 'rect';
       width = Number(rect.width) || 64;
       height = Number(rect.height) || 48;
@@ -147,6 +158,7 @@
       tag: entity.tag,
       camera,
       trigger,
+      solid,
       hasPlayer,
       textureName,
       textureUrl,
@@ -358,6 +370,11 @@
               class="entity-rect"
               style="background-color: {d.color};"
             ></div>
+          {:else if d.visualType === 'tilemap'}
+            <div
+              class="entity-tilemap"
+              style="--tile-color: {d.color};"
+            ></div>
           {:else if d.visualType === 'circle'}
             <div
               class="entity-circle"
@@ -418,6 +435,10 @@
           <!-- Player indicator -->
           {#if d.hasPlayer}
             <div class="player-indicator"></div>
+          {/if}
+
+          {#if d.solid}
+            <div class="solid-indicator">Solid</div>
           {/if}
 
           <!-- Entity tag label -->

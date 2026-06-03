@@ -59,6 +59,7 @@ pub const SpriteRenderer = struct {
     frames: usize = 1,
     fps: f32 = 0,
     loop: bool = true,
+    start_frame: usize = 0,
     current_frame: usize = 0,
     frame_timer: f32 = 0,
 
@@ -83,12 +84,100 @@ pub const PlayerController = struct {
     paused: bool = false,
 };
 
+pub const Solid = struct {
+    enabled: bool = true,
+};
+
+pub const AnimationClip = struct {
+    name: [32]u8 = [_]u8{0} ** 32,
+    name_len: usize = 0,
+    start: usize = 0,
+    frames: usize = 1,
+    fps: f32 = 8,
+    loop: bool = true,
+
+    pub fn init(name: []const u8, start: usize, frames: usize, fps: f32, loop: bool) AnimationClip {
+        var out = AnimationClip{ .start = start, .frames = frames, .fps = fps, .loop = loop };
+        const len = @min(name.len, out.name.len - 1);
+        @memcpy(out.name[0..len], name[0..len]);
+        out.name[len] = 0;
+        out.name_len = len;
+        return out;
+    }
+
+    pub fn matches(self: *const AnimationClip, name: []const u8) bool {
+        return self.name_len == name.len and std.mem.eql(u8, self.name[0..self.name_len], name);
+    }
+};
+
+pub const AnimationState = struct {
+    clips: []const AnimationClip = &.{},
+    current: usize = 0,
+};
+
+pub const Tilemap = struct {
+    columns: usize,
+    rows: usize,
+    tile_width: f32 = 16,
+    tile_height: f32 = 16,
+    tiles: []const u8 = &.{},
+    solid_tiles: []const u8 = &.{},
+    palette: []const rl.Color = &.{},
+
+    pub fn tileAt(self: *const Tilemap, col: usize, row: usize) u8 {
+        if (col >= self.columns or row >= self.rows) return 0;
+        const idx = row * self.columns + col;
+        if (idx >= self.tiles.len) return 0;
+        return self.tiles[idx];
+    }
+
+    pub fn tileIsSolid(self: *const Tilemap, tile: u8) bool {
+        if (tile == 0) return false;
+        for (self.solid_tiles) |solid| {
+            if (solid == tile) return true;
+        }
+        return false;
+    }
+};
+
+pub const Particle = struct {
+    position: rl.Vector2 = .{ .x = 0, .y = 0 },
+    velocity: rl.Vector2 = .{ .x = 0, .y = 0 },
+    life: f32 = 0,
+    max_life: f32 = 0,
+};
+
+pub const ParticleEmitter = struct {
+    color: rl.Color = rl.Color.white,
+    rate: f32 = 12,
+    lifetime: f32 = 0.6,
+    speed: f32 = 40,
+    spread: f32 = 6.28,
+    radius: f32 = 2,
+    burst: usize = 0,
+    timer: f32 = 0,
+    seed: u32 = 1,
+    particles: [64]Particle = [_]Particle{.{}} ** 64,
+};
+
+pub const Tween = struct {
+    to: rl.Vector2,
+    duration: f32,
+    elapsed: f32 = 0,
+    from: rl.Vector2 = .{ .x = 0, .y = 0 },
+    started: bool = false,
+    loop: bool = false,
+};
+
 pub const Camera = struct {
     offset: rl.Vector2 = .{ .x = 0, .y = 0 },
     target: rl.Vector2 = .{ .x = 0, .y = 0 },
     rotation: f32 = 0,
     zoom: f32 = 1.0,
     follow_target: Entity = Entity.INVALID,
+    shake_time: f32 = 0,
+    shake_duration: f32 = 0,
+    shake_intensity: f32 = 0,
 
     pub fn toRaylib(self: *const Camera) rl.Camera2D {
         return .{
@@ -108,6 +197,8 @@ pub const TriggerAction = union(enum) {
     start_dialogue: struct {
         runner: *dialogue.Runner,
         context: ?*anyopaque,
+        id: [events.MAX_ID_LEN]u8,
+        id_len: usize = 0,
         label: [events.MAX_ID_LEN]u8,
         label_len: usize = 0,
     },
@@ -133,13 +224,22 @@ pub fn TriggerShowMessage(text: []const u8, duration: f32) TriggerAction {
     return action;
 }
 
-pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque, label: ?[]const u8) TriggerAction {
+pub fn TriggerDialogueStart(runner: *dialogue.Runner, context: ?*anyopaque, id: ?[]const u8, label: ?[]const u8) TriggerAction {
     var out: TriggerAction = .{ .start_dialogue = .{
         .runner = runner,
         .context = context,
+        .id = [_]u8{0} ** events.MAX_ID_LEN,
+        .id_len = 0,
         .label = [_]u8{0} ** events.MAX_ID_LEN,
         .label_len = 0,
     } };
+
+    if (id) |dialogue_id| {
+        const len = @min(dialogue_id.len, events.MAX_ID_LEN - 1);
+        @memcpy(out.start_dialogue.id[0..len], dialogue_id[0..len]);
+        out.start_dialogue.id[len] = 0;
+        out.start_dialogue.id_len = len;
+    }
 
     if (label) |lbl| {
         const len = @min(lbl.len, events.MAX_ID_LEN - 1);
@@ -328,6 +428,11 @@ pub const World = struct {
     circle_renderers: ComponentStorage(CircleRenderer) = .{},
     rect_renderers: ComponentStorage(RectRenderer) = .{},
     player_controllers: ComponentStorage(PlayerController) = .{},
+    solids: ComponentStorage(Solid) = .{},
+    animation_states: ComponentStorage(AnimationState) = .{},
+    tilemaps: ComponentStorage(Tilemap) = .{},
+    particle_emitters: ComponentStorage(ParticleEmitter) = .{},
+    tweens: ComponentStorage(Tween) = .{},
     cameras: ComponentStorage(Camera) = .{},
     triggers: ComponentStorage(Trigger) = .{},
     box_colliders: ComponentStorage(BoxCollider) = .{},
@@ -359,6 +464,11 @@ pub const World = struct {
         try self.circle_renderers.init(allocator, max_entities);
         try self.rect_renderers.init(allocator, max_entities);
         try self.player_controllers.init(allocator, max_entities);
+        try self.solids.init(allocator, max_entities);
+        try self.animation_states.init(allocator, max_entities);
+        try self.tilemaps.init(allocator, max_entities);
+        try self.particle_emitters.init(allocator, max_entities);
+        try self.tweens.init(allocator, max_entities);
         try self.cameras.init(allocator, max_entities);
         try self.triggers.init(allocator, max_entities);
         try self.box_colliders.init(allocator, max_entities);
@@ -374,6 +484,11 @@ pub const World = struct {
         self.circle_renderers.deinit(self.allocator);
         self.rect_renderers.deinit(self.allocator);
         self.player_controllers.deinit(self.allocator);
+        self.solids.deinit(self.allocator);
+        self.animation_states.deinit(self.allocator);
+        self.tilemaps.deinit(self.allocator);
+        self.particle_emitters.deinit(self.allocator);
+        self.tweens.deinit(self.allocator);
         self.cameras.deinit(self.allocator);
         self.triggers.deinit(self.allocator);
         self.box_colliders.deinit(self.allocator);
@@ -402,6 +517,11 @@ pub const World = struct {
         try self.circle_renderers.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.rect_renderers.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.player_controllers.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.solids.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.animation_states.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.tilemaps.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.particle_emitters.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.tweens.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.cameras.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.triggers.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.box_colliders.ensureEntityCapacity(self.allocator, self.max_entities);
@@ -449,6 +569,11 @@ pub const World = struct {
         self.circle_renderers.remove(entity);
         self.rect_renderers.remove(entity);
         self.player_controllers.remove(entity);
+        self.solids.remove(entity);
+        self.animation_states.remove(entity);
+        self.tilemaps.remove(entity);
+        self.particle_emitters.remove(entity);
+        self.tweens.remove(entity);
         self.cameras.remove(entity);
         self.triggers.remove(entity);
         self.box_colliders.remove(entity);
@@ -524,6 +649,7 @@ pub const Systems = struct {
 
             const transform = world.transforms.get(entity) orelse continue;
             const speed = item.data.speed;
+            const previous = transform.position;
 
             const right_down = rl.isKeyDown(.right);
             const left_down = rl.isKeyDown(.left);
@@ -564,6 +690,10 @@ pub const Systems = struct {
             if (transform.position.y + sprite_h > world.bounds_height) {
                 transform.position.y = world.bounds_height - sprite_h;
             }
+
+            if (collidesWithSolid(world, entity)) {
+                transform.position = previous;
+            }
         }
     }
 
@@ -597,6 +727,15 @@ pub const Systems = struct {
 
                 cam.target = .{ .x = target_x, .y = target_y };
             }
+
+            if (cam.shake_time > 0 and cam.shake_duration > 0) {
+                cam.shake_time = @max(0, cam.shake_time - rl.getFrameTime());
+                const t = cam.shake_time / cam.shake_duration;
+                const amount = cam.shake_intensity * t;
+                const phase = cam.shake_time * 77.0;
+                cam.target.x += @sin(phase) * amount;
+                cam.target.y += @cos(phase * 1.37) * amount;
+            }
         }
     }
 
@@ -609,15 +748,71 @@ pub const Systems = struct {
             const frame_time = 1.0 / sr.fps;
             while (sr.frame_timer >= frame_time) {
                 sr.frame_timer -= frame_time;
-                if (sr.current_frame + 1 < sr.frames) {
+                const end_frame = sr.start_frame + sr.frames;
+                if (sr.current_frame + 1 < end_frame) {
                     sr.current_frame += 1;
                 } else if (sr.loop) {
-                    sr.current_frame = 0;
+                    sr.current_frame = sr.start_frame;
                 } else {
-                    sr.current_frame = sr.frames - 1;
+                    sr.current_frame = end_frame - 1;
                     sr.frame_timer = 0;
                     break;
                 }
+            }
+        }
+    }
+
+    pub fn tweenUpdate(world: *World, dt: f32) void {
+        var it = world.tweens.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const tr = world.transforms.get(entity) orelse continue;
+            const tween = item.data;
+            if (!tween.started) {
+                tween.from = tr.position;
+                tween.started = true;
+            }
+            tween.elapsed += dt;
+            const ratio = std.math.clamp(tween.elapsed / @max(tween.duration, 0.001), 0, 1);
+            const eased = ratio * ratio * (3 - 2 * ratio);
+            tr.position.x = tween.from.x + (tween.to.x - tween.from.x) * eased;
+            tr.position.y = tween.from.y + (tween.to.y - tween.from.y) * eased;
+            if (ratio >= 1) {
+                if (tween.loop) {
+                    const old_from = tween.from;
+                    tween.from = tween.to;
+                    tween.to = old_from;
+                    tween.elapsed = 0;
+                } else {
+                    world.tweens.remove(entity);
+                }
+            }
+        }
+    }
+
+    pub fn particlesUpdate(world: *World, dt: f32) void {
+        var it = world.particle_emitters.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const tr = world.transforms.get(entity) orelse continue;
+            const emitter = item.data;
+
+            var spawn_count: usize = emitter.burst;
+            emitter.burst = 0;
+            emitter.timer += dt * emitter.rate;
+            while (emitter.timer >= 1) {
+                emitter.timer -= 1;
+                spawn_count += 1;
+            }
+            for (0..spawn_count) |_| spawnParticle(emitter, tr.position);
+
+            for (&emitter.particles) |*p| {
+                if (p.life <= 0) continue;
+                p.life -= dt;
+                p.position.x += p.velocity.x * dt;
+                p.position.y += p.velocity.y * dt;
             }
         }
     }
@@ -673,7 +868,10 @@ pub const Systems = struct {
                         world.state.eventQueue.push(events.showMessage(payload.text[0..len], payload.duration)) catch {};
                     },
                     .start_dialogue => |payload| {
-                        if (payload.label_len > 0) {
+                        if (payload.id_len > 0) {
+                            const label = if (payload.label_len > 0) payload.label[0..payload.label_len] else null;
+                            world.state.eventQueue.push(events.startDialogueById(payload.runner, payload.context, payload.id[0..payload.id_len], label)) catch {};
+                        } else if (payload.label_len > 0) {
                             world.state.eventQueue.push(events.startDialogueAt(payload.runner, payload.context, payload.label[0..payload.label_len])) catch {};
                         } else {
                             world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
@@ -701,6 +899,30 @@ pub const Systems = struct {
     }
 
     pub fn render(world: *World) void {
+        {
+            var it = world.tilemaps.iterator();
+            while (it.next()) |item| {
+                const entity = world.entityFromId(item.entity_id);
+                if (!world.isActive(entity)) continue;
+                const tr = world.transforms.getConst(entity) orelse continue;
+                const map = item.data;
+                for (0..map.rows) |row| {
+                    for (0..map.columns) |col| {
+                        const tile = map.tileAt(col, row);
+                        if (tile == 0) continue;
+                        const color = if (tile - 1 < map.palette.len) map.palette[tile - 1] else rl.Color.gray;
+                        rl.drawRectangle(
+                            @intFromFloat(tr.position.x + @as(f32, @floatFromInt(col)) * map.tile_width),
+                            @intFromFloat(tr.position.y + @as(f32, @floatFromInt(row)) * map.tile_height),
+                            @intFromFloat(map.tile_width),
+                            @intFromFloat(map.tile_height),
+                            color,
+                        );
+                    }
+                }
+            }
+        }
+
         {
             var it = world.circle_renderers.iterator();
             while (it.next()) |item| {
@@ -745,7 +967,7 @@ pub const Systems = struct {
                 const sprite_w: f32 = if (sr.frame_width > 0) sr.frame_width else texture_w;
                 const sprite_h: f32 = if (sr.frame_height > 0) sr.frame_height else texture_h;
                 const columns = @max(1, @as(usize, @intFromFloat(@floor(texture_w / sprite_w))));
-                const frame = @min(sr.current_frame, sr.frames - 1);
+                const frame = @min(sr.current_frame, sr.start_frame + sr.frames - 1);
                 const frame_x: f32 = @floatFromInt(frame % columns);
                 const frame_y: f32 = @floatFromInt(frame / columns);
 
@@ -766,6 +988,22 @@ pub const Systems = struct {
                 };
 
                 rl.drawTexturePro(sr.texture, src, dest, .{ .x = 0, .y = 0 }, tr.rotation, sr.tint);
+            }
+        }
+
+        {
+            var it = world.particle_emitters.iterator();
+            while (it.next()) |item| {
+                const entity = world.entityFromId(item.entity_id);
+                if (!world.isActive(entity)) continue;
+                const emitter = item.data;
+                for (emitter.particles) |p| {
+                    if (p.life <= 0) continue;
+                    const alpha = @as(u8, @intFromFloat(std.math.clamp(p.life / @max(p.max_life, 0.001), 0, 1) * 255));
+                    var color = emitter.color;
+                    color.a = alpha;
+                    rl.drawCircle(@intFromFloat(p.position.x), @intFromFloat(p.position.y), emitter.radius, color);
+                }
             }
         }
     }
@@ -823,6 +1061,36 @@ pub const Systems = struct {
         }
     }
 
+    pub fn shakeCamera(world: *World, intensity: f32, duration: f32) void {
+        var it = world.cameras.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            item.data.shake_intensity = intensity;
+            item.data.shake_duration = duration;
+            item.data.shake_time = duration;
+            break;
+        }
+    }
+
+    pub fn setAnimation(world: *World, tag: []const u8, name: []const u8) bool {
+        const entity = world.findByTag(tag) orelse return false;
+        const anim = world.animation_states.get(entity) orelse return false;
+        const sr = world.sprite_renderers.get(entity) orelse return false;
+        for (anim.clips, 0..) |clip, i| {
+            if (!clip.matches(name)) continue;
+            anim.current = i;
+            sr.current_frame = clip.start;
+            sr.start_frame = clip.start;
+            sr.frames = clip.frames;
+            sr.fps = clip.fps;
+            sr.loop = clip.loop;
+            sr.frame_timer = 0;
+            return true;
+        }
+        return false;
+    }
+
     pub fn setPlayerPaused(world: *World, paused: bool) void {
         var it = world.player_controllers.iterator();
         while (it.next()) |item| {
@@ -835,6 +1103,68 @@ pub const Systems = struct {
         while (it.next()) |item| {
             item.data.reset();
         }
+    }
+
+    fn spawnParticle(emitter: *ParticleEmitter, origin: rl.Vector2) void {
+        for (&emitter.particles) |*p| {
+            if (p.life > 0) continue;
+            emitter.seed = emitter.seed *% 1664525 +% 1013904223;
+            const unit = @as(f32, @floatFromInt(emitter.seed & 0xffff)) / 65535.0;
+            const angle = (unit - 0.5) * emitter.spread;
+            p.position = origin;
+            p.velocity = .{ .x = @cos(angle) * emitter.speed, .y = @sin(angle) * emitter.speed };
+            p.life = emitter.lifetime;
+            p.max_life = emitter.lifetime;
+            return;
+        }
+    }
+
+    fn entityRect(world: *World, entity: Entity) ?rl.Rectangle {
+        const tr = world.transforms.get(entity) orelse return null;
+        if (world.box_colliders.get(entity)) |col| return col.getRect(tr);
+        if (world.sprite_renderers.get(entity)) |sr| {
+            const sprite_w = if (sr.frame_width > 0) sr.frame_width else @as(f32, @floatFromInt(sr.texture.width));
+            const sprite_h = if (sr.frame_height > 0) sr.frame_height else @as(f32, @floatFromInt(sr.texture.height));
+            const abs_scale = @abs(tr.scale.x);
+            return .{ .x = tr.position.x, .y = tr.position.y, .width = sprite_w * abs_scale, .height = sprite_h * abs_scale };
+        }
+        return null;
+    }
+
+    fn collidesWithSolid(world: *World, moving: Entity) bool {
+        const rect = entityRect(world, moving) orelse return false;
+
+        var solid_it = world.solids.iterator();
+        while (solid_it.next()) |item| {
+            if (!item.data.enabled) continue;
+            const other = world.entityFromId(item.entity_id);
+            if (!world.isActive(other) or other.eql(moving)) continue;
+            const other_rect = entityRect(world, other) orelse continue;
+            if (rl.checkCollisionRecs(rect, other_rect)) return true;
+        }
+
+        var map_it = world.tilemaps.iterator();
+        while (map_it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const tr = world.transforms.get(entity) orelse continue;
+            const map = item.data;
+            for (0..map.rows) |row| {
+                for (0..map.columns) |col| {
+                    const tile = map.tileAt(col, row);
+                    if (!map.tileIsSolid(tile)) continue;
+                    const tile_rect = rl.Rectangle{
+                        .x = tr.position.x + @as(f32, @floatFromInt(col)) * map.tile_width,
+                        .y = tr.position.y + @as(f32, @floatFromInt(row)) * map.tile_height,
+                        .width = map.tile_width,
+                        .height = map.tile_height,
+                    };
+                    if (rl.checkCollisionRecs(rect, tile_rect)) return true;
+                }
+            }
+        }
+
+        return false;
     }
 };
 
@@ -881,6 +1211,11 @@ pub const EntityBuilder = struct {
 
     pub fn withPlayerController(self: *EntityBuilder, speed: f32) *EntityBuilder {
         self.world.player_controllers.set(self.world.allocator, self.entity, .{ .speed = speed }) catch {};
+        return self;
+    }
+
+    pub fn withSolid(self: *EntityBuilder) *EntityBuilder {
+        self.world.solids.set(self.world.allocator, self.entity, .{}) catch {};
         return self;
     }
 

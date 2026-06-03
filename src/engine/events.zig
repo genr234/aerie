@@ -23,8 +23,15 @@ pub const ShowMessage = struct {
 pub const StartDialogue = struct {
     runner: *dialogue.Runner,
     context: ?*anyopaque = null,
+    dialogueId: [MAX_ID_LEN]u8 = undefined,
+    dialogueIdLen: usize = 0,
     labelId: [MAX_ID_LEN]u8 = undefined,
     labelLen: usize = 0,
+
+    pub fn getDialogueId(self: *const StartDialogue) ?[]const u8 {
+        if (self.dialogueIdLen == 0) return null;
+        return self.dialogueId[0..self.dialogueIdLen];
+    }
 
     pub fn getLabel(self: *const StartDialogue) ?[]const u8 {
         if (self.labelLen == 0) return null;
@@ -109,6 +116,22 @@ pub fn startDialogueAt(runner: *dialogue.Runner, context: ?*anyopaque, label: []
     var ev: StartDialogue = .{ .runner = runner, .context = context, .labelLen = len };
     @memcpy(ev.labelId[0..len], label[0..len]);
     ev.labelId[len] = 0;
+    return .{ .StartDialogue = ev };
+}
+
+pub fn startDialogueById(runner: *dialogue.Runner, context: ?*anyopaque, id: []const u8, label: ?[]const u8) Event {
+    const id_len = @min(id.len, MAX_ID_LEN - 1);
+    var ev: StartDialogue = .{ .runner = runner, .context = context, .dialogueIdLen = id_len };
+    @memcpy(ev.dialogueId[0..id_len], id[0..id_len]);
+    ev.dialogueId[id_len] = 0;
+
+    if (label) |lbl| {
+        const label_len = @min(lbl.len, MAX_ID_LEN - 1);
+        @memcpy(ev.labelId[0..label_len], lbl[0..label_len]);
+        ev.labelId[label_len] = 0;
+        ev.labelLen = label_len;
+    }
+
     return .{ .StartDialogue = ev };
 }
 
@@ -282,11 +305,7 @@ pub const EventQueue = struct {
             },
 
             .StartDialogue => |*dlg| {
-                if (dlg.getLabel()) |label| {
-                    dlg.runner.startAt(dlg.context, label);
-                } else {
-                    dlg.runner.start(dlg.context);
-                }
+                _ = dlg.runner.startDialogue(dlg.context, dlg.getDialogueId(), dlg.getLabel());
                 return true;
             },
 
