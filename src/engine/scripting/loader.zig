@@ -230,10 +230,10 @@ pub const Loader = struct {
         \\}
         \\
         \\class Events {
-        \\  static message(text, duration) { return Engine.showMessage(text, duration) }
-        \\  static playSound(id, volume, loop) { return Engine.playSound(id, volume, loop) }
-        \\  static pause(paused) { return Engine.pause(paused) }
-        \\  static quit() { return Engine.quit() }
+        \\  static message(text, duration) { Engine.showMessage(text, duration) }
+        \\  static playSound(id, volume, loop) { Engine.playSound(id, volume, loop) }
+        \\  static pause(paused) { Engine.pause(paused) }
+        \\  static quit() { Engine.quit() }
         \\}
         \\
         \\class State {
@@ -252,71 +252,71 @@ pub const Loader = struct {
         \\
         \\  static update(name, callback) { State.set(name, callback.call(State.get(name))) }
         \\
-        \\  static setFlag(name, value) { return Engine.setFlag(name, value) }
-        \\  static getFlag(name) { return Engine.getFlag(name) }
-        \\  static toggleFlag(name) { return Engine.toggleFlag(name) }
-        \\  static hasFlag(name) { return Engine.hasFlag(name) }
+        \\  static setFlag(name, value) { Engine.setFlag(name, value) }
+        \\  static getFlag(name) { Engine.getFlag(name) }
+        \\  static toggleFlag(name) { Engine.toggleFlag(name) }
+        \\  static hasFlag(name) { Engine.hasFlag(name) }
         \\
-        \\  static setInt(name, value) { return Engine.setInt(name, value) }
-        \\  static getInt(name) { return Engine.getInt(name) }
-        \\  static addInt(name, delta) { return Engine.addInt(name, delta) }
+        \\  static setInt(name, value) { Engine.setInt(name, value) }
+        \\  static getInt(name) { Engine.getInt(name) }
+        \\  static addInt(name, delta) { Engine.addInt(name, delta) }
         \\
-        \\  static setFloat(name, value) { return Engine.setFloat(name, value) }
-        \\  static getFloat(name) { return Engine.getFloat(name) }
+        \\  static setFloat(name, value) { Engine.setFloat(name, value) }
+        \\  static getFloat(name) { Engine.getFloat(name) }
         \\
-        \\  static setString(name, value) { return Engine.setString(name, value) }
-        \\  static getString(name) { return Engine.getString(name) }
+        \\  static setString(name, value) { Engine.setString(name, value) }
+        \\  static getString(name) { Engine.getString(name) }
         \\
-        \\  static setRelationship(name, value) { return Engine.setRelationship(name, value) }
-        \\  static getRelationship(name) { return Engine.getRelationship(name) }
-        \\  static modifyRelationship(name, delta) { return Engine.modifyRelationship(name, delta) }
+        \\  static setRelationship(name, value) { Engine.setRelationship(name, value) }
+        \\  static getRelationship(name) { Engine.getRelationship(name) }
+        \\  static modifyRelationship(name, delta) { Engine.modifyRelationship(name, delta) }
         \\
-        \\  static setChapter(chapter) { return Engine.setChapter(chapter) }
-        \\  static getChapter() { return Engine.getChapter() }
-        \\  static setRoute(route) { return Engine.setRoute(route) }
-        \\  static getRoute() { return Engine.getRoute() }
-        \\  static getPlayTimeMinutes() { return Engine.getPlayTimeMinutes() }
+        \\  static setChapter(chapter) { Engine.setChapter(chapter) }
+        \\  static getChapter() { Engine.getChapter() }
+        \\  static setRoute(route) { Engine.setRoute(route) }
+        \\  static getRoute() { Engine.getRoute() }
+        \\  static getPlayTimeMinutes() { Engine.getPlayTimeMinutes() }
         \\}
         \\
         \\class Save {
-        \\  static write(slot) { return Engine.saveWrite(slot) }
-        \\  static load(slot) { return Engine.saveLoad(slot) }
-        \\  static exists(slot) { return Engine.saveExists(slot) }
-        \\  static clear(slot) { return Engine.saveClear(slot) }
+        \\  static write(slot) { Engine.saveWrite(slot) }
+        \\  static load(slot) { Engine.saveLoad(slot) }
+        \\  static exists(slot) { Engine.saveExists(slot) }
+        \\  static clear(slot) { Engine.saveClear(slot) }
         \\}
         \\
         \\class Scene {
-        \\  static change(index) { return Engine.change(index) }
-        \\  static go(name) { return Engine.changeByName(name) }
-        \\  static currentIndex() { return Engine.currentIndex() }
-        \\  static findIndex(name) { return Engine.findIndex(name) }
-        \\  static count() { return Engine.sceneCount() }
+        \\  static change(index) { Engine.change(index) }
+        \\  static go(name) { Engine.changeByName(name) }
+        \\  static currentIndex() { Engine.currentIndex() }
+        \\  static findIndex(name) { Engine.findIndex(name) }
+        \\  static count() { Engine.sceneCount() }
         \\}
         \\
         \\class Dialogue {
-        \\  static start() { return Engine.start() }
-        \\  static start(id) { return Engine.start(id) }
-        \\  static startAt(label) { return Engine.startAt(label) }
-        \\  static stop() { return Engine.stopDialogue() }
-        \\  static isActive() { return Engine.dialogueIsActive() }
-        \\  static skip() { return Engine.dialogueSkip() }
-        \\  static advance() { return Engine.dialogueAdvance() }
+        \\  static start() { Engine.start() }
+        \\  static start(id) { Engine.start(id) }
+        \\  static startAt(label) { Engine.startAt(label) }
+        \\  static stop() { Engine.stopDialogue() }
+        \\  static isActive() { Engine.dialogueIsActive() }
+        \\  static skip() { Engine.dialogueSkip() }
+        \\  static advance() { Engine.dialogueAdvance() }
         \\}
         \\
         \\class Entity {
-        \\  static exists(tag) { return Engine.entityExists(tag) }
-        \\  static setActive(tag, active) { return Engine.entitySetActive(tag, active) }
-        \\  static getPosition(tag) { return Engine.entityGetPosition(tag) }
-        \\  static setPosition(tag, x, y) { return Engine.entitySetPosition(tag, x, y) }
+        \\  static exists(tag) { Engine.entityExists(tag) }
+        \\  static setActive(tag, active) { Engine.entitySetActive(tag, active) }
+        \\  static getPosition(tag) { Engine.entityGetPosition(tag) }
+        \\  static setPosition(tag, x, y) { Engine.entitySetPosition(tag, x, y) }
         \\}
         \\
         \\class Input {
-        \\  static onKeyPressed(key, callback) { return Engine.onKeyPressed(key, callback) }
-        \\  static onKeyReleased(key, callback) { return Engine.onKeyReleased(key, callback) }
-        \\  static onAnyKey(callback) { return Engine.onAnyKey(callback) }
-        \\  static onMousePressed(button, callback) { return Engine.onMousePressed(button, callback) }
-        \\  static onMouseMove(callback) { return Engine.onMouseMove(callback) }
-        \\  static onTick(callback) { return Engine.onTick(callback) }
+        \\  static onKeyPressed(key, callback) { Engine.onKeyPressed(key, callback) }
+        \\  static onKeyReleased(key, callback) { Engine.onKeyReleased(key, callback) }
+        \\  static onAnyKey(callback) { Engine.onAnyKey(callback) }
+        \\  static onMousePressed(button, callback) { Engine.onMousePressed(button, callback) }
+        \\  static onMouseMove(callback) { Engine.onMouseMove(callback) }
+        \\  static onTick(callback) { Engine.onTick(callback) }
         \\}
         \\    
     ;
