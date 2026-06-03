@@ -1,13 +1,10 @@
 <script lang="ts">
   import {
-    FileArchive,
-    FilePlus2,
-    FolderOpen,
+    ArrowLeft,
     ImagePlus,
     RotateCcw,
     RotateCw,
     Save,
-    Upload,
     Download,
     Play as PlayIcon,
     Square,
@@ -16,29 +13,23 @@
   import {
     project,
     dirty,
-    projectRoot,
     vfs,
-    showNewProject,
     diagnostics,
-    selectedPath,
     previewRunning,
     canUndo,
     canRedo,
   } from "../lib/stores";
 
   import {
-    chooseProjectFolder,
-    openFolder,
     saveFolder,
-    loadSample,
     undo,
     redo,
-    importZip,
     importAssets,
     exportZip,
     exportWeb,
     play,
     stop,
+    closeProjectToProjects,
   } from "../lib/actions";
   import { fatalDiagnostics } from "../lib/project";
 
@@ -55,25 +46,15 @@
         : ""}</span
     >
   </div>
-  <div class="path-tools">
-    <input placeholder="/path/to/project" bind:value={$projectRoot} />
+  <div class="toolbar">
     <button
       class="tool-button"
-      on:click={chooseProjectFolder}
-      title="Browse"
-      aria-label="Browse"
+      on:click={closeProjectToProjects}
+      title="Projects"
+      aria-label="Projects"
     >
-      <FolderOpen size={16} aria-hidden="true" />
-      <span>Browse</span>
-    </button>
-    <button
-      class="tool-button"
-      on:click={openFolder}
-      title="Open folder"
-      aria-label="Open folder"
-    >
-      <Upload size={16} aria-hidden="true" />
-      <span>Open</span>
+      <ArrowLeft size={16} aria-hidden="true" />
+      <span>Projects</span>
     </button>
     <button
       class="tool-button"
@@ -84,26 +65,6 @@
     >
       <Save size={16} aria-hidden="true" />
       <span>Save</span>
-    </button>
-  </div>
-  <div class="toolbar">
-    <button
-      class="tool-button"
-      on:click={() => ($showNewProject = true)}
-      title="New project"
-      aria-label="New project"
-    >
-      <FilePlus2 size={16} aria-hidden="true" />
-      <span>New Project</span>
-    </button>
-    <button
-      class="tool-button"
-      on:click={loadSample}
-      title="Load reference"
-      aria-label="Load reference"
-    >
-      <FolderOpen size={16} aria-hidden="true" />
-      <span>Reference</span>
     </button>
     <button
       class="icon-button"
@@ -123,15 +84,6 @@
     >
       <RotateCw size={16} aria-hidden="true" />
     </button>
-    <label
-      class="file-button tool-button"
-      title="Import zip"
-      aria-label="Import zip"
-    >
-      <FileArchive size={16} aria-hidden="true" />
-      <span>Import Zip</span>
-      <input type="file" accept=".zip,application/zip" on:change={importZip} />
-    </label>
     <label
       class="file-button tool-button"
       title="Import assets"

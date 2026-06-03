@@ -9,8 +9,9 @@ import type {
 } from './types';
 import type { PreviewLog } from './previewRuntime';
 
-export type MainTab = "scene" | "script" | "dialogue" | "settings" | "raw";
+export type MainTab = "scene" | "script" | "dialogue" | "settings" | "raw" | "asset";
 export type BottomTab = "diagnostics" | "output" | "problems";
+export type AppScreen = "projects" | "editor";
 
 export type DragState = {
   scenePath: string;
@@ -29,6 +30,7 @@ export const projectRoot = writable<string>("");
 export const project = writable<ProjectConfig | undefined>(undefined);
 
 // UI State
+export const currentScreen = writable<AppScreen>("projects");
 export const selection = writable<Selection>({ type: "file", path: "game.json" });
 export const selectedPath = writable<string>("game.json");
 export const rawText = writable<string>("");
@@ -42,7 +44,6 @@ export const inspectorCollapsed = writable<boolean>(false);
 export const dragState = writable<DragState | undefined>(undefined);
 
 // Modal/Form State
-export const showNewProject = writable<boolean>(false);
 export const newProjectTitle = writable<string>("Tiny Story");
 export const newProjectId = writable<string>("tiny-story");
 export const newProjectTemplate = writable<"tiny" | "choice" | "two-room" | "blank">("tiny");

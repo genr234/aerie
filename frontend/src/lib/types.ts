@@ -38,6 +38,16 @@ export type DialogueDocument = {
   id: string;
   start?: string;
   nodes: DialogueNode[];
+  editor?: DialogueEditorState;
+};
+
+export type DialogueEditorState = {
+  nodes?: Record<string, DialogueNodePosition>;
+};
+
+export type DialogueNodePosition = {
+  x: number;
+  y: number;
 };
 
 export type DialogueNode = {

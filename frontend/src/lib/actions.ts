@@ -4,9 +4,9 @@ import {
   vfs, projectRoot, project, dirty, status, undoStack, redoStack,
   diagnostics, runtimeDiagnostics, activeBottomTab, activeMainTab,
   selection, selectedPath, rawText, assetRenameName, output, previewRunning,
-  newProjectTitle, newProjectId, newProjectTemplate, showNewProject,
+  newProjectTitle, newProjectId, newProjectTemplate,
   showCreateScene, showCreateScript, showCreateDialogue,
-  newSceneName, newScriptName, newDialogueName
+  newSceneName, newScriptName, newDialogueName, currentScreen
 } from './stores';
 import {
   openProjectFolder, saveProjectFolder, exportWebBundle, startPreview, stopPreview
@@ -18,9 +18,23 @@ import {
   parseProject, validateAll, fatalDiagnostics, parseScene, parseDialogue,
   writeScene, writeDialogue
 } from './project';
+import {
+  deleteDialogueNodeAndClearLinks,
+  duplicateDialogueNode as duplicateDialogueNodeInDocument,
+  renameDialogueNodeId,
+  setDialogueAutoLayout,
+  setDialogueNodePosition,
+  uniqueDialogueId,
+} from './dialogueGraph';
 import { createTemplateProject } from './templates';
 import type { MainTab } from './stores';
-import type { DialogueChoice, DialogueNode, ProjectConfig, SceneDocument, SceneEntity, Selection } from './types';
+import type { DialogueChoice, DialogueNode, DialogueNodePosition, ProjectConfig, SceneDocument, SceneEntity, Selection, Vfs } from './types';
+
+type OpenLoadedProjectOptions = {
+  dirtyPaths?: Iterable<string>;
+  root?: string;
+  statusMessage: string;
+};
 
 export function refreshProject() {
   const currentVfs = get(vfs);
@@ -38,7 +52,13 @@ export function selectFile(
   tab?: MainTab
 ) {
   const currentTab = get(activeMainTab);
-  const finalTab = tab ?? (path.endsWith(".wren") ? "script" : path.endsWith(".json") ? "raw" : currentTab);
+  const finalTab = tab ?? (path.endsWith(".wren")
+    ? "script"
+    : path.endsWith(".json")
+      ? "raw"
+      : /\.(png|jpg|jpeg)$/i.test(path)
+        ? "asset"
+        : currentTab);
   
   selectedPath.set(path);
   selection.set({ type: "file", path });
@@ -149,19 +169,54 @@ export function uniqueAssetPath(path: string, current: Map<string, any>): string
   return `${base}-${index}${ext}`;
 }
 
+export function openLoadedProject(loadedVfs: Vfs, options: OpenLoadedProjectOptions) {
+  vfs.set(loadedVfs);
+  dirty.set(new Set(options.dirtyPaths ?? []));
+  clearHistory();
+  if (options.root !== undefined) projectRoot.set(options.root);
+  refreshProject();
+  const p = get(project);
+  selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
+  currentScreen.set("editor");
+  status.set(options.statusMessage);
+}
+
+export async function closeProjectToProjects() {
+  if (!confirmDiscardDirty("Return to projects?")) return;
+  if (get(previewRunning)) {
+    try {
+      await stopPreview();
+    } catch {
+      // The active editor state is still cleared if preview shutdown fails.
+    }
+  }
+  vfs.set(new Map());
+  dirty.set(new Set());
+  clearHistory();
+  project.set(undefined);
+  diagnostics.set([]);
+  runtimeDiagnostics.set([]);
+  output.set([]);
+  previewRunning.set(false);
+  selection.set({ type: "file", path: "game.json" });
+  selectedPath.set("game.json");
+  rawText.set("");
+  assetRenameName.set("");
+  activeMainTab.set("scene");
+  activeBottomTab.set("diagnostics");
+  currentScreen.set("projects");
+  status.set("Choose a project to open.");
+}
+
 // Commands
 export async function loadSample() {
   if (!confirmDiscardDirty("Load the reference project?")) return;
   try {
     const loadedVfs = await loadReferenceProject();
-    vfs.set(loadedVfs);
-    dirty.set(new Set());
-    clearHistory();
-    projectRoot.set("");
-    refreshProject();
-    const p = get(project);
-    selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
-    status.set("Reference project loaded.");
+    openLoadedProject(loadedVfs, {
+      root: "",
+      statusMessage: "Reference project loaded.",
+    });
   } catch (error) {
     status.set(messageOf(error));
   }
@@ -176,13 +231,10 @@ export async function openFolder() {
   }
   try {
     const loadedVfs = await openProjectFolder(root);
-    vfs.set(loadedVfs);
-    dirty.set(new Set());
-    clearHistory();
-    refreshProject();
-    const p = get(project);
-    selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
-    status.set(`Opened ${root}.`);
+    openLoadedProject(loadedVfs, {
+      root,
+      statusMessage: `Opened ${root}.`,
+    });
   } catch (error) {
     status.set(messageOf(error));
   }
@@ -284,13 +336,10 @@ export async function importZip(event: Event) {
   }
   try {
     const importedVfs = await vfsFromZip(file);
-    vfs.set(importedVfs);
-    dirty.set(new Set([...importedVfs.keys()]));
-    clearHistory();
-    refreshProject();
-    const p = get(project);
-    selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
-    status.set(`Imported ${file.name}.`);
+    openLoadedProject(importedVfs, {
+      dirtyPaths: importedVfs.keys(),
+      statusMessage: `Imported ${file.name}.`,
+    });
   } catch (error) {
     status.set(messageOf(error));
   } finally {
@@ -332,15 +381,11 @@ export async function createNewProject() {
   const id = slugify(get(newProjectId) || title);
   try {
     const importedVfs = await createTemplateProject(id, title, get(newProjectTemplate));
-    vfs.set(importedVfs);
-    dirty.set(new Set([...importedVfs.keys()]));
-    clearHistory();
-    projectRoot.set("");
-    showNewProject.set(false);
-    refreshProject();
-    const p = get(project);
-    selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
-    status.set(`${title} created. Choose a folder and save when ready.`);
+    openLoadedProject(importedVfs, {
+      dirtyPaths: importedVfs.keys(),
+      root: "",
+      statusMessage: `${title} created. Choose a folder and save when ready.`,
+    });
   } catch (error) {
     status.set(messageOf(error));
   }
@@ -558,16 +603,19 @@ export function updateDialogueField(field: string, value: unknown) {
 }
 
 export function addDialogueNode() {
+  let createdId = "";
   mutateCurrentDialogue((dialogue) => {
-    const id = uniqueId("node", new Set(dialogue.nodes.map((node) => node.id)));
+    const id = uniqueDialogueId("node", new Set(dialogue.nodes.map((node) => node.id)));
+    createdId = id;
     dialogue.nodes.push({ id, text: "" });
+    setDialogueNodePosition(dialogue, id, { x: 80 + dialogue.nodes.length * 24, y: 80 + dialogue.nodes.length * 24 });
   });
+  return createdId;
 }
 
 export function deleteDialogueNode(index: number) {
   mutateCurrentDialogue((dialogue) => {
-    dialogue.nodes.splice(index, 1);
-    if (dialogue.nodes.length === 0) dialogue.nodes.push({ id: "start", text: "" });
+    deleteDialogueNodeAndClearLinks(dialogue, index);
   });
 }
 
@@ -582,7 +630,13 @@ export function moveDialogueNode(index: number, dir: number) {
 
 export function updateDialogueNode(index: number, patch: Partial<DialogueNode>) {
   mutateCurrentDialogue((dialogue) => {
-    dialogue.nodes[index] = cleanUndefined({ ...dialogue.nodes[index], ...patch }) as DialogueNode;
+    if (patch.id !== undefined) {
+      renameDialogueNodeId(dialogue, index, patch.id);
+      const { id: _id, ...rest } = patch;
+      dialogue.nodes[index] = cleanUndefined({ ...dialogue.nodes[index], ...rest }) as DialogueNode;
+    } else {
+      dialogue.nodes[index] = cleanUndefined({ ...dialogue.nodes[index], ...patch }) as DialogueNode;
+    }
   });
 }
 
@@ -612,6 +666,40 @@ export function deleteDialogueChoice(nodeIndex: number, choiceIndex: number) {
 
 export function setDialogueAction(nodeIndex: number, actions: Array<Record<string, unknown>>) {
   updateDialogueNode(nodeIndex, { actions });
+}
+
+export function updateDialogueNodePosition(id: string, position: DialogueNodePosition) {
+  mutateCurrentDialogue((dialogue) => {
+    setDialogueNodePosition(dialogue, id, position);
+  });
+}
+
+export function autoLayoutCurrentDialogue() {
+  mutateCurrentDialogue((dialogue) => {
+    setDialogueAutoLayout(dialogue);
+  });
+}
+
+export function duplicateDialogueNode(index: number) {
+  let createdId: string | undefined;
+  mutateCurrentDialogue((dialogue) => {
+    createdId = duplicateDialogueNodeInDocument(dialogue, index);
+  });
+  return createdId;
+}
+
+export function setDialogueStartNode(id: string) {
+  mutateCurrentDialogue((dialogue) => {
+    dialogue.start = id;
+  });
+}
+
+export function updateDialogueNodeNext(index: number, next: string) {
+  updateDialogueNode(index, { next: next || undefined });
+}
+
+export function updateDialogueChoiceNext(nodeIndex: number, choiceIndex: number, next: string) {
+  updateDialogueChoice(nodeIndex, choiceIndex, { next: next || undefined });
 }
 
 export function slugify(text: string) { return text.toLowerCase().replace(/[^a-z0-9]+/g, "-"); }

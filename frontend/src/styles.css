@@ -176,12 +176,113 @@ small,
 }
 
 .toolbar {
-  grid-column: 1 / -1;
+  justify-content: flex-end;
   flex-wrap: wrap;
 }
 
 .path-tools input {
   min-width: 260px;
+}
+
+.projects-screen {
+  min-height: 100vh;
+  background: #eef2f4;
+  display: grid;
+  place-items: start center;
+  padding: 48px 24px;
+}
+
+.projects-panel {
+  width: min(920px, 100%);
+  display: grid;
+  gap: 20px;
+}
+
+.projects-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.projects-heading strong {
+  color: #182028;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.projects-heading span {
+  color: #5f6a72;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.project-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 16px;
+  align-items: start;
+}
+
+.project-section {
+  background: #ffffff;
+  border: 1px solid #d6dde1;
+  border-radius: 8px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.project-section h2 {
+  margin: 0;
+}
+
+.project-folder-row,
+.project-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-folder-row input {
+  min-width: 0;
+}
+
+.new-project-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.new-project-grid label {
+  display: grid;
+  gap: 5px;
+  color: #57636b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.create-project-button {
+  justify-self: start;
+}
+
+.project-status {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .projects-screen {
+    padding: 24px 14px;
+  }
+
+  .project-sections,
+  .project-folder-row {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .project-actions-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .file-button {
@@ -325,12 +426,12 @@ small,
 
 .workspace {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 180px;
+  grid-template-rows: minmax(0, 1fr) 180px;
   overflow: hidden;
 }
 
 .workspace.panel-collapsed {
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .workspace.panel-collapsed .bottom-panel-content {
