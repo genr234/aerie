@@ -8,6 +8,7 @@ pub const ProjectError = error{
     EmptyScenes,
     DuplicateSceneName,
     DuplicateScriptName,
+    DuplicateDialogueName,
     MissingStartScene,
 };
 
@@ -22,6 +23,7 @@ pub const ProjectConfig = struct {
     start_scene: []const u8 = "assets/scenes/start.json",
     scenes: []SceneDecl = &.{},
     scripts: []ScriptDecl = &.{},
+    dialogues: []DialogueDecl = &.{},
 
     window_width: i32 = 800,
     window_height: i32 = 450,
@@ -38,6 +40,11 @@ pub const ScriptDecl = struct {
     path: []const u8,
 };
 
+pub const DialogueDecl = struct {
+    name: []const u8,
+    path: []const u8,
+};
+
 pub const SceneSource = struct {
     name: []const u8,
     json: []const u8,
@@ -48,10 +55,16 @@ pub const ScriptModule = struct {
     source: []const u8,
 };
 
+pub const DialogueAsset = struct {
+    name: []const u8,
+    source: []const u8,
+};
+
 pub const ProjectBundle = struct {
     config: ProjectConfig,
     scenes: []SceneSource,
     scripts: []const ScriptModule,
+    dialogues: []const DialogueAsset = &.{},
     resources: ?resources.ResourceProvider = null,
     asset_root: []const u8 = ".",
 
@@ -75,6 +88,13 @@ pub const ProjectBundle = struct {
     pub fn findScript(self: *const ProjectBundle, name: []const u8) ?ScriptModule {
         for (self.scripts) |script| {
             if (std.mem.eql(u8, script.name, name)) return script;
+        }
+        return null;
+    }
+
+    pub fn findDialogue(self: *const ProjectBundle, name: []const u8) ?DialogueAsset {
+        for (self.dialogues) |asset| {
+            if (std.mem.eql(u8, asset.name, name)) return asset;
         }
         return null;
     }
@@ -108,7 +128,42 @@ pub fn loadProjectBundleFromProvider(
     provider: resources.ResourceProvider,
     asset_root: []const u8,
 ) !ProjectBundle {
-    return loadProjectBundleFromProviderWithFallbackScripts(allocator, provider, asset_root, null);
+    return loadProjectBundleFromProviderOnly(allocator, provider, asset_root);
+}
+
+fn loadProjectBundleFromProviderOnly(
+    allocator: std.mem.Allocator,
+    provider: resources.ResourceProvider,
+    asset_root: []const u8,
+) !ProjectBundle {
+    const config_text = provider.readText(allocator, "game.json") catch return ProjectError.MissingField;
+    defer allocator.free(config_text);
+    const cfg = try parseProjectConfigJson(allocator, config_text);
+
+    const scenes = if (cfg.scenes.len > 0)
+        try loadDeclaredScenes(allocator, provider, cfg.scenes)
+    else blk: {
+        const scene_json = try provider.readText(allocator, cfg.start_scene);
+        const scene_name = try dupString(allocator, cfg.start_scene);
+        const out = try allocator.alloc(SceneSource, 1);
+        out[0] = .{ .name = scene_name, .json = scene_json };
+        break :blk out;
+    };
+
+    const scripts = if (cfg.scripts.len > 0)
+        try loadDeclaredScripts(allocator, provider, cfg.scripts)
+    else
+        &.{};
+    const dialogues = try loadDeclaredDialogues(allocator, provider, cfg.dialogues);
+
+    return .{
+        .config = cfg,
+        .scenes = scenes,
+        .scripts = scripts,
+        .dialogues = dialogues,
+        .resources = provider,
+        .asset_root = try dupString(allocator, asset_root),
+    };
 }
 
 fn loadProjectBundleFromProviderWithFallbackScripts(
@@ -137,11 +192,13 @@ fn loadProjectBundleFromProviderWithFallbackScripts(
         try loadScriptModulesFromFs(allocator, project_root)
     else
         &.{};
+    const dialogues = try loadDeclaredDialogues(allocator, provider, cfg.dialogues);
 
     return .{
         .config = cfg,
         .scenes = scenes,
         .scripts = scripts,
+        .dialogues = dialogues,
         .resources = provider,
         .asset_root = try dupString(allocator, asset_root),
     };
@@ -230,6 +287,7 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
         if (!sceneDeclsContainStart(cfg.scenes, cfg.start_scene)) return ProjectError.MissingStartScene;
     }
     if (obj.get("scripts")) |s| cfg.scripts = try parseScriptDecls(allocator, s);
+    if (obj.get("dialogues")) |d| cfg.dialogues = try parseDialogueDecls(allocator, d);
 
     if (obj.get("window")) |w| {
         if (w != .object) return ProjectError.InvalidType;
@@ -269,6 +327,20 @@ fn loadDeclaredScripts(allocator: std.mem.Allocator, provider: resources.Resourc
     return scripts;
 }
 
+fn loadDeclaredDialogues(allocator: std.mem.Allocator, provider: resources.ResourceProvider, decls: []const DialogueDecl) ![]DialogueAsset {
+    const dialogues = try allocator.alloc(DialogueAsset, decls.len);
+    errdefer allocator.free(dialogues);
+
+    for (decls, 0..) |decl, i| {
+        dialogues[i] = .{
+            .name = try dupString(allocator, decl.name),
+            .source = try provider.readText(allocator, decl.path),
+        };
+    }
+
+    return dialogues;
+}
+
 fn parseSceneDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]SceneDecl {
     if (v != .array) return ProjectError.InvalidType;
     if (v.array.items.len == 0) return ProjectError.EmptyScenes;
@@ -305,6 +377,27 @@ fn parseScriptDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]ScriptDe
         };
         for (out[0..i]) |existing| {
             if (std.mem.eql(u8, existing.name, decl.name)) return ProjectError.DuplicateScriptName;
+        }
+        out[i] = decl;
+    }
+
+    return out;
+}
+
+fn parseDialogueDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]DialogueDecl {
+    if (v != .array) return ProjectError.InvalidType;
+
+    const out = try allocator.alloc(DialogueDecl, v.array.items.len);
+    errdefer allocator.free(out);
+
+    for (v.array.items, 0..) |item, i| {
+        if (item != .object) return ProjectError.InvalidType;
+        const decl = DialogueDecl{
+            .name = try dupString(allocator, try getString(item.object, "name")),
+            .path = try dupString(allocator, try getString(item.object, "path")),
+        };
+        for (out[0..i]) |existing| {
+            if (std.mem.eql(u8, existing.name, decl.name)) return ProjectError.DuplicateDialogueName;
         }
         out[i] = decl;
     }

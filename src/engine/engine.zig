@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 pub const rl = @import("raylib");
 
 const mem = @import("memory.zig");
+const log = @import("log.zig");
 const scenes = @import("scenes.zig");
 const project = @import("project.zig");
 const dialogue = @import("dialogue.zig");
@@ -58,25 +59,32 @@ pub const Engine = struct {
         self.project_root = bundle.asset_root;
         const project_cfg = bundle.config;
 
-        const ztitle = try std.fmt.allocPrint(mem.frame(), "{s}", .{project_cfg.window_title});
-        ztitle.ptr[ztitle.len] = 0;
-        rl.initWindow(project_cfg.window_width, project_cfg.window_height, @ptrCast(ztitle.ptr[0..ztitle.len :0]));
+        const ztitle = try mem.frame().dupeZ(u8, project_cfg.window_title);
+        rl.initWindow(project_cfg.window_width, project_cfg.window_height, ztitle);
         rl.setTargetFPS(60);
 
         // Systems
         self.gameState.eventQueue = events.EventQueue.init();
         self.gameState.storyState = story.StoryState.initWithEvents(&self.gameState.eventQueue);
 
-        var builder = dialogue.Builder.init(mem.permanent());
-        defer builder.deinit();
-        _ = builder.done();
-        self.gameState.script = try builder.build();
+        if (bundle.dialogues.len > 0) {
+            self.gameState.script = try dialogue.parseScriptJson(mem.permanent(), bundle.dialogues[0].source);
+        } else {
+            var builder = dialogue.Builder.init(mem.permanent());
+            defer builder.deinit();
+            _ = builder.done();
+            self.gameState.script = try builder.build();
+        }
         self.gameState.gameDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.script);
 
-        var vnBuilder = dialogue.Builder.init(mem.permanent());
-        defer vnBuilder.deinit();
-        _ = vnBuilder.done();
-        self.gameState.vnScript = try vnBuilder.build();
+        if (bundle.dialogues.len > 0) {
+            self.gameState.vnScript = try dialogue.parseScriptJson(mem.permanent(), bundle.dialogues[0].source);
+        } else {
+            var vnBuilder = dialogue.Builder.init(mem.permanent());
+            defer vnBuilder.deinit();
+            _ = vnBuilder.done();
+            self.gameState.vnScript = try vnBuilder.build();
+        }
         self.gameState.vnDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.vnScript);
 
         self.gameState.vnState = vn.VNState.init(screenWidth, screenHeight);
@@ -103,7 +111,7 @@ pub const Engine = struct {
         const scene_irs = try mem.permanent().alloc(sceneio_types.SceneIR, bundle.scenes.len);
         for (bundle.scenes, 0..) |scene_source, i| {
             scene_irs[i] = sceneio_json.parseSceneIR(mem.permanent(), scene_source.json) catch |err| {
-                std.debug.print("Failed to parse scene '{s}': {any}\n", .{ scene_source.name, err });
+                log.debug("Failed to parse scene '{s}': {any}\n", .{ scene_source.name, err });
                 return err;
             };
         }
@@ -124,8 +132,9 @@ pub const Engine = struct {
                 .visual_novel => try scenes.Scene.initVNForScene(ir.width, ir.height, &self.gameState),
             };
             scene.name = scene_source.name;
+            if (ir.background_color) |color| scene.background_color = color;
             sceneio_instantiate.instantiateSceneIR(mem.frame(), &scene, ir, &textures, dialogue_bindings) catch |err| {
-                std.debug.print("Failed to instantiate scene '{s}': {any}\n", .{ scene_source.name, err });
+                log.debug("Failed to instantiate scene '{s}': {any}\n", .{ scene_source.name, err });
                 return err;
             };
             self.gameState.manager.scenes[i] = scene;
@@ -135,6 +144,7 @@ pub const Engine = struct {
         self.gameState.manager.currentIndex = self.gameState.manager.findSceneByName(start_scene.name) orelse 0;
 
         self.scriptCtx = .{
+            .projectRoot = self.project_root,
             .eventQueue = &self.gameState.eventQueue,
             .storyState = &self.gameState.storyState,
             .sceneManager = self.gameState.manager,
@@ -143,7 +153,7 @@ pub const Engine = struct {
             .vnActive = &self.gameState.vnActive,
         };
         self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, bundle.asset_root, bundle.scripts, bundle.resources, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
-            std.debug.print("[wren] runtime init failed: {any}\n", .{err});
+            log.debug("[wren] runtime init failed: {any}\n", .{err});
             break :blk null;
         };
 
@@ -200,7 +210,9 @@ pub const Engine = struct {
         }
 
         if (self.wrenRuntime) |*rt| {
-            rt.reloadIfChanged();
+            if (builtin.os.tag != .emscripten) {
+                rt.reloadIfChanged();
+            }
             rt.dispatchInput(dt);
             _ = rt.callOnUpdate(dt);
         }
@@ -238,7 +250,7 @@ fn loadTexture(bundle: *const project.ProjectBundle, path: []const u8) !rl.Textu
 
     const player_path = try assets.parseAssetPath(mem.frame(), bundle.asset_root, path, builtin.os.tag);
     return rl.loadTexture(player_path) catch |err| {
-        std.debug.print("Failed to load texture: {s}\n", .{player_path});
+        log.debug("Failed to load texture: {s}\n", .{player_path});
         return err;
     };
 }
@@ -263,7 +275,7 @@ fn loadSceneTextures(bundle: *const project.ProjectBundle, scene_irs: []const sc
         entries[i] = .{
             .name = try mem.permanent().dupe(u8, path),
             .texture = loadTexture(bundle, path) catch |err| {
-                std.debug.print("Failed to load texture asset '{s}': {any}\n", .{ path, err });
+                log.debug("Failed to load texture asset '{s}': {any}\n", .{ path, err });
                 return err;
             },
         };

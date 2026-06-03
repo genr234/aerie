@@ -1,5 +1,6 @@
 const std = @import("std");
 const rl = @import("raylib");
+const log = @import("log.zig");
 const dialogue = @import("dialogue.zig");
 const scenes = @import("scenes.zig");
 const story = @import("story.zig");
@@ -282,11 +283,10 @@ pub const EventQueue = struct {
 
             .StartDialogue => |*dlg| {
                 if (dlg.getLabel()) |label| {
-                    if (dlg.runner.script.findLabel(label)) |idx| {
-                        dlg.runner.index = idx;
-                    }
+                    dlg.runner.startAt(dlg.context, label);
+                } else {
+                    dlg.runner.start(dlg.context);
                 }
-                dlg.runner.start(dlg.context);
                 return true;
             },
 
@@ -296,7 +296,7 @@ pub const EventQueue = struct {
                         mgr.changeScene(cs.sceneIndex) catch {};
                     } else if (cs.getSceneName()) |name| {
                         mgr.changeSceneByName(name) catch |err| {
-                            std.debug.print("Scene transition failed for '{s}': {any}\n", .{ name, err });
+                            log.debug("Scene transition failed for '{s}': {any}\n", .{ name, err });
                         };
                     }
                 }

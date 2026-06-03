@@ -52,6 +52,12 @@ fn parseRoot(allocator: std.mem.Allocator, root: std.json.Value) !types.SceneIR 
         if (sval.object.get("height")) |h| height = @intCast(try asInt(h));
     }
 
+    var background_color: ?rl.Color = null;
+    if (obj.get("background")) |bg| {
+        if (bg != .object) return JsonError.InvalidType;
+        if (bg.object.get("color")) |color| background_color = try parseColor(color);
+    }
+
     const entities_val = obj.get("entities") orelse return JsonError.MissingField;
     const entities = try parseEntities(allocator, entities_val);
 
@@ -60,6 +66,7 @@ fn parseRoot(allocator: std.mem.Allocator, root: std.json.Value) !types.SceneIR 
         .scene_type = scene_type,
         .width = width,
         .height = height,
+        .background_color = background_color,
         .entities = entities,
     };
 }
@@ -168,7 +175,14 @@ fn parseSprite(allocator: std.mem.Allocator, v: std.json.Value) !types.SpriteIR 
     var tint: ?rl.Color = null;
     if (v.object.get("tint")) |t| tint = try parseColor(t);
 
-    return .{ .texture = texture, .flip_x = flip_x, .tint = tint };
+    var out = types.SpriteIR{ .texture = texture, .flip_x = flip_x, .tint = tint };
+    if (v.object.get("frameWidth")) |fw| out.frame_width = @floatCast(try asFloat(fw));
+    if (v.object.get("frameHeight")) |fh| out.frame_height = @floatCast(try asFloat(fh));
+    if (v.object.get("frames")) |frames| out.frames = @intCast(try asInt(frames));
+    if (v.object.get("fps")) |fps| out.fps = @floatCast(try asFloat(fps));
+    if (v.object.get("loop")) |loop| out.loop = try asBool(loop);
+
+    return out;
 }
 
 fn parseCircle(v: std.json.Value) !types.CircleIR {
@@ -239,9 +253,11 @@ fn parseTriggerAction(allocator: std.mem.Allocator, v: std.json.Value) !types.Tr
 
     if (v.object.get("startDialogue")) |sd| {
         if (sd != .object) return JsonError.InvalidType;
+        var id: ?[]const u8 = null;
         var label: ?[]const u8 = null;
+        if (sd.object.get("id")) |l| id = try dupString(allocator, try asString(l));
         if (sd.object.get("label")) |l| label = try dupString(allocator, try asString(l));
-        return .{ .StartDialogue = .{ .label = label } };
+        return .{ .StartDialogue = .{ .id = id, .label = label } };
     }
 
     if (v.object.get("showMessage")) |sm| {

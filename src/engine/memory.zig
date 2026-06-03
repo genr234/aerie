@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const log = @import("log.zig");
 
 pub const Memory = struct {
     /// Backing allocator (page_allocator in debug for safety, c_allocator in release/wasm)
@@ -48,7 +49,7 @@ pub const Memory = struct {
         if (self.debug_gpa) |*gpa| {
             const status = gpa.deinit();
             if (status == .leak) {
-                std.debug.print("[memory] warning: GeneralPurposeAllocator detected leaks\n", .{});
+                log.debug("[memory] warning: GeneralPurposeAllocator detected leaks\n", .{});
             }
             self.debug_gpa = null;
         }

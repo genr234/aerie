@@ -4,6 +4,7 @@ const scenes = @import("../scenes.zig");
 const story = @import("../story.zig");
 
 pub const ScriptingContext = struct {
+    projectRoot: []const u8,
     eventQueue: *events.EventQueue,
     storyState: *story.StoryState,
     sceneManager: *scenes.SceneManager,

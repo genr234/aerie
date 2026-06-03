@@ -96,6 +96,7 @@ fn vtableFor(scene_type: SceneType) SceneTypeVTable {
 pub const SceneConfig = struct {
     width: i32 = 800,
     height: i32 = 450,
+    background_color: rl.Color = rl.Color.white,
 
     scene_type: SceneType = .exploration,
 
@@ -111,6 +112,7 @@ pub const Scene = struct {
     name: []const u8 = "",
     width: i32 = 800,
     height: i32 = 450,
+    background_color: rl.Color = rl.Color.white,
 
     scene_type: SceneType = .exploration,
 
@@ -221,12 +223,14 @@ pub const Scene = struct {
     pub fn runSystems(self: *Self, dt: f32, paused: bool) void {
         ecs.Systems.setPlayerPaused(&self.world, paused);
         ecs.Systems.playerMovement(&self.world, dt);
+        ecs.Systems.spriteAnimation(&self.world, dt);
         ecs.Systems.cameraFollow(&self.world);
         ecs.Systems.triggerCheck(&self.world);
         ecs.Systems.processEvents(&self.world, dt);
     }
 
     pub fn drawWorld(self: *Self) void {
+        rl.clearBackground(self.background_color);
         ecs.Systems.render(&self.world);
     }
 

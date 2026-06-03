@@ -54,6 +54,13 @@ pub const SpriteRenderer = struct {
     texture: rl.Texture2D,
     flip_x: bool = false,
     tint: rl.Color = rl.Color.white,
+    frame_width: f32 = 0,
+    frame_height: f32 = 0,
+    frames: usize = 1,
+    fps: f32 = 0,
+    loop: bool = true,
+    current_frame: usize = 0,
+    frame_timer: f32 = 0,
 
     pub fn init(texture: rl.Texture2D) SpriteRenderer {
         return .{ .texture = texture };
@@ -593,6 +600,28 @@ pub const Systems = struct {
         }
     }
 
+    pub fn spriteAnimation(world: *World, dt: f32) void {
+        var it = world.sprite_renderers.iterator();
+        while (it.next()) |item| {
+            var sr = item.data;
+            if (sr.frames <= 1 or sr.fps <= 0) continue;
+            sr.frame_timer += dt;
+            const frame_time = 1.0 / sr.fps;
+            while (sr.frame_timer >= frame_time) {
+                sr.frame_timer -= frame_time;
+                if (sr.current_frame + 1 < sr.frames) {
+                    sr.current_frame += 1;
+                } else if (sr.loop) {
+                    sr.current_frame = 0;
+                } else {
+                    sr.current_frame = sr.frames - 1;
+                    sr.frame_timer = 0;
+                    break;
+                }
+            }
+        }
+    }
+
     /// Check trigger collisions
     pub fn triggerCheck(world: *World) void {
         // Find player collider
@@ -711,13 +740,19 @@ pub const Systems = struct {
                 const tr = world.transforms.getConst(entity) orelse continue;
                 const sr = item.data;
 
-                const sprite_w: f32 = @floatFromInt(sr.texture.width);
-                const sprite_h: f32 = @floatFromInt(sr.texture.height);
+                const texture_w: f32 = @floatFromInt(sr.texture.width);
+                const texture_h: f32 = @floatFromInt(sr.texture.height);
+                const sprite_w: f32 = if (sr.frame_width > 0) sr.frame_width else texture_w;
+                const sprite_h: f32 = if (sr.frame_height > 0) sr.frame_height else texture_h;
+                const columns = @max(1, @as(usize, @intFromFloat(@floor(texture_w / sprite_w))));
+                const frame = @min(sr.current_frame, sr.frames - 1);
+                const frame_x: f32 = @floatFromInt(frame % columns);
+                const frame_y: f32 = @floatFromInt(frame / columns);
 
                 const flip = sr.flip_x or tr.scale.x < 0;
                 const src = rl.Rectangle{
-                    .x = if (flip) sprite_w else 0,
-                    .y = 0,
+                    .x = frame_x * sprite_w + if (flip) sprite_w else 0,
+                    .y = frame_y * sprite_h,
                     .width = if (flip) -sprite_w else sprite_w,
                     .height = sprite_h,
                 };

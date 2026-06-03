@@ -1,13 +1,18 @@
 const std = @import("std");
 
+const log = @import("../log.zig");
 const dialogue = @import("../dialogue.zig");
 const events = @import("../events.zig");
 const story = @import("../story.zig");
 const ui = @import("../ui.zig");
+const resources = @import("../resources.zig");
 
 const context = @import("context.zig");
 const runtime_mod = @import("runtime.zig");
 const wren_c = @import("wren_c.zig");
+
+extern "c" fn mkdir(path: [*:0]const u8, mode: c_uint) c_int;
+const c_mkdir = mkdir;
 
 pub const Api = struct {
     const engine_map = std.StaticStringMap(wren_c.c.WrenForeignMethodFn).initComptime(.{
@@ -38,6 +43,10 @@ pub const Api = struct {
         .{ "getRoute()", &story_getRoute },
         .{ "getPlayTimeMinutes", &story_getPlayTimeMinutes },
         .{ "getPlayTimeMinutes()", &story_getPlayTimeMinutes },
+        .{ "saveWrite(_)", &save_write },
+        .{ "saveLoad(_)", &save_load },
+        .{ "saveExists(_)", &save_exists },
+        .{ "saveClear(_)", &save_clear },
         .{ "change(_)", &scene_change },
         .{ "changeByName(_)", &scene_changeByName },
         .{ "currentIndex", &scene_currentIndex },
@@ -47,6 +56,7 @@ pub const Api = struct {
         .{ "sceneCount()", &scene_count },
         .{ "start", &dialogue_start },
         .{ "start()", &dialogue_start },
+        .{ "start(_)", &dialogue_start_id },
         .{ "startAt(_)", &dialogue_startAt },
         .{ "stopDialogue", &dialogue_stop },
         .{ "stopDialogue()", &dialogue_stop },
@@ -145,11 +155,11 @@ pub const Api = struct {
         const text = getSlotString(vm, 1, &text_buf);
         const duration = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
 
-        std.debug.print("[wren->zig] showMessage '{s}' ({d:.2}s)\n", .{ text, duration });
+        log.debug("[wren->zig] showMessage '{s}' ({d:.2}s)\n", .{ text, duration });
 
         var ctx = getCtx(vm);
         ctx.eventQueue.push(events.showMessage(text, duration)) catch |err| {
-            std.debug.print("[wren->zig] eventQueue.push failed: {any}\n", .{err});
+            log.debug("[wren->zig] eventQueue.push failed: {any}\n", .{err});
         };
     }
 
@@ -350,6 +360,218 @@ pub const Api = struct {
         wren_c.c.wrenSetSlotDouble(vm, 0, ctx.storyState.getPlayTimeMinutes());
     }
 
+    fn save_write(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const slot = getSlotString(vm, 1, &slot_buf);
+        const ctx = getCtx(vm);
+        const ok = writeSaveSlot(ctx, slot) catch |err| blk: {
+            log.debug("[save] write '{s}' failed: {any}\n", .{ slot, err });
+            break :blk false;
+        };
+        wren_c.c.wrenSetSlotBool(vm, 0, ok);
+    }
+
+    fn save_load(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const slot = getSlotString(vm, 1, &slot_buf);
+        const ctx = getCtx(vm);
+        const ok = loadSaveSlot(ctx, slot) catch |err| blk: {
+            log.debug("[save] load '{s}' failed: {any}\n", .{ slot, err });
+            break :blk false;
+        };
+        wren_c.c.wrenSetSlotBool(vm, 0, ok);
+    }
+
+    fn save_exists(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const slot = getSlotString(vm, 1, &slot_buf);
+        const ctx = getCtx(vm);
+        const path = saveSlotPath(ctx.projectRoot, slot) catch {
+            wren_c.c.wrenSetSlotBool(vm, 0, false);
+            return;
+        };
+        defer std.heap.page_allocator.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        const exists = if (std.Io.Dir.cwd().access(io, path, .{})) true else |_| false;
+        wren_c.c.wrenSetSlotBool(vm, 0, exists);
+    }
+
+    fn save_clear(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const slot = getSlotString(vm, 1, &slot_buf);
+        const ctx = getCtx(vm);
+        const path = saveSlotPath(ctx.projectRoot, slot) catch {
+            wren_c.c.wrenSetSlotBool(vm, 0, false);
+            return;
+        };
+        defer std.heap.page_allocator.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => {
+                log.debug("[save] clear '{s}' failed: {any}\n", .{ slot, err });
+                wren_c.c.wrenSetSlotBool(vm, 0, false);
+                return;
+            },
+        };
+        wren_c.c.wrenSetSlotBool(vm, 0, true);
+    }
+
+    fn writeSaveSlot(ctx: *context.ScriptingContext, slot: []const u8) !bool {
+        const allocator = std.heap.page_allocator;
+        const path = try saveSlotPath(ctx.projectRoot, slot);
+        defer allocator.free(path);
+
+        const dir_path = try std.fs.path.join(allocator, &.{ ctx.projectRoot, "saves" });
+        defer allocator.free(dir_path);
+        try makeDirIfMissing(dir_path);
+
+        const io = std.Io.Threaded.global_single_threaded.io();
+        var file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = true });
+        defer file.close(io);
+
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        const w = &writer.interface;
+
+        try w.writeAll("{\n  \"version\": 1,\n");
+        try w.print("  \"scene\": \"{f}\",\n", .{std.json.fmt(ctx.sceneManager.currentScene().name, .{})});
+        try w.print("  \"scene_index\": {d},\n", .{ctx.sceneManager.currentIndex});
+        try w.print("  \"play_time\": {d},\n", .{ctx.storyState.playTime});
+        try w.writeAll("  \"flags\": {\n");
+        for (ctx.storyState.flags[0..ctx.storyState.flagCount], 0..) |flag, i| {
+            try w.print("    \"{f}\": {}", .{ std.json.fmt(flag.getName(), .{}), flag.value });
+            try w.writeAll(if (i + 1 < ctx.storyState.flagCount) ",\n" else "\n");
+        }
+        try w.writeAll("  },\n  \"vars\": {\n");
+        for (ctx.storyState.vars[0..ctx.storyState.varCount], 0..) |variable, i| {
+            try w.print("    \"{f}\": ", .{std.json.fmt(variable.getName(), .{})});
+            switch (variable.value) {
+                .int => |value| try w.print("{{\"type\":\"int\",\"value\":{d}}}", .{value}),
+                .float => |value| try w.print("{{\"type\":\"float\",\"value\":{d}}}", .{value}),
+                .string => |value| try w.print("{{\"type\":\"string\",\"value\":\"{f}\"}}", .{std.json.fmt(value.data[0..value.len], .{})}),
+            }
+            try w.writeAll(if (i + 1 < ctx.storyState.varCount) ",\n" else "\n");
+        }
+        try w.writeAll("  }\n}\n");
+        try w.flush();
+        return true;
+    }
+
+    fn loadSaveSlot(ctx: *context.ScriptingContext, slot: []const u8) !bool {
+        const allocator = std.heap.page_allocator;
+        const path = try saveSlotPath(ctx.projectRoot, slot);
+        defer allocator.free(path);
+
+        const bytes = resources.readFileAlloc(allocator, path) catch |err| switch (err) {
+            error.FileNotFound => return false,
+            else => return err,
+        };
+        defer allocator.free(bytes);
+
+        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, bytes, .{});
+        defer parsed.deinit();
+        const root = parsed.value.object;
+        const version = jsonInt(root.get("version") orelse return false) orelse return false;
+        if (version != 1) return false;
+
+        ctx.storyState.reset();
+        if (root.get("play_time")) |value| {
+            ctx.storyState.playTime = jsonFloat(value) orelse 0.0;
+        }
+
+        if (root.get("flags")) |flags_value| {
+            if (flags_value == .object) {
+                var it = flags_value.object.iterator();
+                while (it.next()) |entry| {
+                    if (entry.value_ptr.* == .bool) {
+                        ctx.storyState.setFlagInternal(entry.key_ptr.*, entry.value_ptr.bool);
+                    }
+                }
+            }
+        }
+
+        if (root.get("vars")) |vars_value| {
+            if (vars_value == .object) {
+                var it = vars_value.object.iterator();
+                while (it.next()) |entry| {
+                    if (entry.value_ptr.* != .object) continue;
+                    const var_obj = entry.value_ptr.object;
+                    const type_name = jsonString(var_obj.get("type") orelse continue) orelse continue;
+                    const value = var_obj.get("value") orelse continue;
+                    if (std.mem.eql(u8, type_name, "int")) {
+                        if (jsonInt(value)) |n| ctx.storyState.setInt(entry.key_ptr.*, @intCast(n));
+                    } else if (std.mem.eql(u8, type_name, "float")) {
+                        if (jsonFloat(value)) |n| ctx.storyState.setFloat(entry.key_ptr.*, @floatCast(n));
+                    } else if (std.mem.eql(u8, type_name, "string")) {
+                        if (jsonString(value)) |text| ctx.storyState.setString(entry.key_ptr.*, text);
+                    }
+                }
+            }
+        }
+
+        if (root.get("scene")) |scene_value| {
+            if (jsonString(scene_value)) |scene_name| {
+                ctx.sceneManager.changeSceneByName(scene_name) catch {};
+            }
+        } else if (root.get("scene_index")) |index_value| {
+            if (jsonInt(index_value)) |scene_index| {
+                if (scene_index >= 0) ctx.sceneManager.changeScene(@intCast(scene_index)) catch {};
+            }
+        }
+
+        return true;
+    }
+
+    fn saveSlotPath(project_root: []const u8, slot: []const u8) ![]u8 {
+        if (!isSafeSlot(slot)) return error.InvalidSaveSlot;
+        return std.fmt.allocPrint(std.heap.page_allocator, "{s}{c}saves{c}{s}.json", .{ project_root, std.fs.path.sep, std.fs.path.sep, slot });
+    }
+
+    fn makeDirIfMissing(path: []const u8) !void {
+        const zpath = try std.heap.page_allocator.dupeZ(u8, path);
+        defer std.heap.page_allocator.free(zpath);
+        const result = c_mkdir(zpath.ptr, 0o755);
+        if (result == 0) return;
+        const io = std.Io.Threaded.global_single_threaded.io();
+        std.Io.Dir.cwd().access(io, path, .{}) catch return error.MakeDirFailed;
+    }
+
+    fn isSafeSlot(slot: []const u8) bool {
+        if (slot.len == 0 or slot.len > 32) return false;
+        for (slot) |c| {
+            if (!std.ascii.isAlphanumeric(c) and c != '_' and c != '-') return false;
+        }
+        return true;
+    }
+
+    fn jsonString(value: std.json.Value) ?[]const u8 {
+        return switch (value) {
+            .string => |s| s,
+            else => null,
+        };
+    }
+
+    fn jsonInt(value: std.json.Value) ?i64 {
+        return switch (value) {
+            .integer => |n| n,
+            .float => |n| @intFromFloat(n),
+            else => null,
+        };
+    }
+
+    fn jsonFloat(value: std.json.Value) ?f64 {
+        return switch (value) {
+            .integer => |n| @floatFromInt(n),
+            .float => |n| n,
+            else => null,
+        };
+    }
+
     fn scene_change(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
         const vm = vm_opt.?;
         const idx = @as(usize, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 1)));
@@ -404,6 +626,20 @@ pub const Api = struct {
         var ctx = getCtx(vm);
         const runner: *dialogue.Runner = ctx.activeDialogue();
         ctx.eventQueue.push(events.startDialogueAt(runner, ctx.storyState, label)) catch {};
+    }
+
+    fn dialogue_start_id(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var id_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const id = getSlotString(vm, 1, &id_buf);
+
+        var ctx = getCtx(vm);
+        const runner: *dialogue.Runner = ctx.activeDialogue();
+        if (std.mem.eql(u8, id, runner.script.id)) {
+            ctx.eventQueue.push(events.startDialogue(runner, ctx.storyState)) catch {};
+        } else {
+            ctx.eventQueue.push(events.startDialogueAt(runner, ctx.storyState, id)) catch {};
+        }
     }
 
     fn dialogue_stop(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {

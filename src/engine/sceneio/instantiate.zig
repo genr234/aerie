@@ -78,6 +78,11 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
             var sr = ecs.SpriteRenderer.init(tex);
             sr.flip_x = s.flip_x;
             if (s.tint) |tint| sr.tint = tint;
+            sr.frame_width = s.frame_width;
+            sr.frame_height = s.frame_height;
+            sr.frames = s.frames;
+            sr.fps = s.fps;
+            sr.loop = s.loop;
             try scene.world.sprite_renderers.set(scene.world.allocator, entity, sr);
         },
         .Circle => |c| {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assets = @import("../utils/assets.zig");
+const log = @import("../log.zig");
 const project = @import("../project.zig");
 const resources = @import("../resources.zig");
 const wren_c = @import("wren_c.zig");
@@ -58,17 +59,9 @@ pub const Loader = struct {
         const asset_path = try assets.resolveAssetPath(self.allocator, self.project_root, rel, builtin.os.tag);
         defer self.allocator.free(asset_path);
 
-        const io = std.Io.Threaded.global_single_threaded.io();
-        var file = std.Io.Dir.cwd().openFile(io, asset_path, .{}) catch |err| {
-            std.debug.print("[wren] failed to open {s}: {any}\n", .{ asset_path, err });
+        return resources.readFileAlloc(self.allocator, asset_path) catch |err| {
+            log.debug("[wren] failed to open {s}: {any}\n", .{ asset_path, err });
             return error.WrenLoadFailed;
-        };
-        defer file.close(io);
-
-        var reader = file.reader(io, &.{});
-        return reader.interface.allocRemaining(self.allocator, .limited(1 << 20)) catch |err| switch (err) {
-            error.ReadFailed => return reader.err.?,
-            else => |e| return e,
         };
     }
 
@@ -107,19 +100,7 @@ pub const Loader = struct {
             return .{ .source = null, .onComplete = null, .userData = null };
         };
 
-        const io = std.Io.Threaded.global_single_threaded.io();
-        var file = std.Io.Dir.cwd().openFile(io, asset_path, .{}) catch {
-            self.allocator.free(asset_path);
-            return .{ .source = null, .onComplete = null, .userData = null };
-        };
-        defer file.close(io);
-
-        // Allocate module source using the C allocator so `onComplete` can free
-        // it reliably (Wren doesn't pass a Loader instance back).
-        // Wren expects a null-terminated C string whose lifetime extends until
-        // `onComplete` is called.
-        var reader = file.reader(io, &.{});
-        const src = reader.interface.allocRemaining(std.heap.c_allocator, .limited(1 << 20)) catch {
+        const src = resources.readFileAlloc(std.heap.c_allocator, asset_path) catch {
             self.allocator.free(asset_path);
             return .{ .source = null, .onComplete = null, .userData = null };
         };
@@ -206,6 +187,10 @@ pub const Loader = struct {
         \\  foreign static setRoute(route)
         \\  foreign static getRoute()
         \\  foreign static getPlayTimeMinutes()
+        \\  foreign static saveWrite(slot)
+        \\  foreign static saveLoad(slot)
+        \\  foreign static saveExists(slot)
+        \\  foreign static saveClear(slot)
         \\
         \\  foreign static change(index)
         \\  foreign static changeByName(name)
@@ -214,6 +199,7 @@ pub const Loader = struct {
         \\  foreign static sceneCount()
         \\
         \\  foreign static start()
+        \\  foreign static start(id)
         \\  foreign static startAt(label)
         \\  foreign static stopDialogue()
         \\  foreign static dialogueIsActive()
@@ -244,10 +230,10 @@ pub const Loader = struct {
         \\}
         \\
         \\class Events {
-        \\  static message(text, duration) { Engine.showMessage(text, duration) }
-        \\  static playSound(id, volume, loop) { Engine.playSound(id, volume, loop) }
-        \\  static pause(paused) { Engine.pause(paused) }
-        \\  static quit() { Engine.quit() }
+        \\  static message(text, duration) { return Engine.showMessage(text, duration) }
+        \\  static playSound(id, volume, loop) { return Engine.playSound(id, volume, loop) }
+        \\  static pause(paused) { return Engine.pause(paused) }
+        \\  static quit() { return Engine.quit() }
         \\}
         \\
         \\class State {
@@ -266,63 +252,71 @@ pub const Loader = struct {
         \\
         \\  static update(name, callback) { State.set(name, callback.call(State.get(name))) }
         \\
-        \\  static setFlag(name, value) { Engine.setFlag(name, value) }
-        \\  static getFlag(name) { Engine.getFlag(name) }
-        \\  static toggleFlag(name) { Engine.toggleFlag(name) }
-        \\  static hasFlag(name) { Engine.hasFlag(name) }
+        \\  static setFlag(name, value) { return Engine.setFlag(name, value) }
+        \\  static getFlag(name) { return Engine.getFlag(name) }
+        \\  static toggleFlag(name) { return Engine.toggleFlag(name) }
+        \\  static hasFlag(name) { return Engine.hasFlag(name) }
         \\
-        \\  static setInt(name, value) { Engine.setInt(name, value) }
-        \\  static getInt(name) { Engine.getInt(name) }
-        \\  static addInt(name, delta) { Engine.addInt(name, delta) }
+        \\  static setInt(name, value) { return Engine.setInt(name, value) }
+        \\  static getInt(name) { return Engine.getInt(name) }
+        \\  static addInt(name, delta) { return Engine.addInt(name, delta) }
         \\
-        \\  static setFloat(name, value) { Engine.setFloat(name, value) }
-        \\  static getFloat(name) { Engine.getFloat(name) }
+        \\  static setFloat(name, value) { return Engine.setFloat(name, value) }
+        \\  static getFloat(name) { return Engine.getFloat(name) }
         \\
-        \\  static setString(name, value) { Engine.setString(name, value) }
-        \\  static getString(name) { Engine.getString(name) }
+        \\  static setString(name, value) { return Engine.setString(name, value) }
+        \\  static getString(name) { return Engine.getString(name) }
         \\
-        \\  static setRelationship(name, value) { Engine.setRelationship(name, value) }
-        \\  static getRelationship(name) { Engine.getRelationship(name) }
-        \\  static modifyRelationship(name, delta) { Engine.modifyRelationship(name, delta) }
+        \\  static setRelationship(name, value) { return Engine.setRelationship(name, value) }
+        \\  static getRelationship(name) { return Engine.getRelationship(name) }
+        \\  static modifyRelationship(name, delta) { return Engine.modifyRelationship(name, delta) }
         \\
-        \\  static setChapter(chapter) { Engine.setChapter(chapter) }
-        \\  static getChapter() { Engine.getChapter() }
-        \\  static setRoute(route) { Engine.setRoute(route) }
-        \\  static getRoute() { Engine.getRoute() }
-        \\  static getPlayTimeMinutes() { Engine.getPlayTimeMinutes() }
+        \\  static setChapter(chapter) { return Engine.setChapter(chapter) }
+        \\  static getChapter() { return Engine.getChapter() }
+        \\  static setRoute(route) { return Engine.setRoute(route) }
+        \\  static getRoute() { return Engine.getRoute() }
+        \\  static getPlayTimeMinutes() { return Engine.getPlayTimeMinutes() }
+        \\}
+        \\
+        \\class Save {
+        \\  static write(slot) { return Engine.saveWrite(slot) }
+        \\  static load(slot) { return Engine.saveLoad(slot) }
+        \\  static exists(slot) { return Engine.saveExists(slot) }
+        \\  static clear(slot) { return Engine.saveClear(slot) }
         \\}
         \\
         \\class Scene {
-        \\  static change(index) { Engine.change(index) }
-        \\  static go(name) { Engine.changeByName(name) }
-        \\  static currentIndex() { Engine.currentIndex() }
-        \\  static findIndex(name) { Engine.findIndex(name) }
-        \\  static count() { Engine.sceneCount() }
+        \\  static change(index) { return Engine.change(index) }
+        \\  static go(name) { return Engine.changeByName(name) }
+        \\  static currentIndex() { return Engine.currentIndex() }
+        \\  static findIndex(name) { return Engine.findIndex(name) }
+        \\  static count() { return Engine.sceneCount() }
         \\}
         \\
         \\class Dialogue {
-        \\  static start() { Engine.start() }
-        \\  static startAt(label) { Engine.startAt(label) }
-        \\  static stop() { Engine.stopDialogue() }
-        \\  static isActive() { Engine.dialogueIsActive() }
-        \\  static skip() { Engine.dialogueSkip() }
-        \\  static advance() { Engine.dialogueAdvance() }
+        \\  static start() { return Engine.start() }
+        \\  static start(id) { return Engine.start(id) }
+        \\  static startAt(label) { return Engine.startAt(label) }
+        \\  static stop() { return Engine.stopDialogue() }
+        \\  static isActive() { return Engine.dialogueIsActive() }
+        \\  static skip() { return Engine.dialogueSkip() }
+        \\  static advance() { return Engine.dialogueAdvance() }
         \\}
         \\
         \\class Entity {
-        \\  static exists(tag) { Engine.entityExists(tag) }
-        \\  static setActive(tag, active) { Engine.entitySetActive(tag, active) }
-        \\  static getPosition(tag) { Engine.entityGetPosition(tag) }
-        \\  static setPosition(tag, x, y) { Engine.entitySetPosition(tag, x, y) }
+        \\  static exists(tag) { return Engine.entityExists(tag) }
+        \\  static setActive(tag, active) { return Engine.entitySetActive(tag, active) }
+        \\  static getPosition(tag) { return Engine.entityGetPosition(tag) }
+        \\  static setPosition(tag, x, y) { return Engine.entitySetPosition(tag, x, y) }
         \\}
         \\
         \\class Input {
-        \\  static onKeyPressed(key, callback) { Engine.onKeyPressed(key, callback) }
-        \\  static onKeyReleased(key, callback) { Engine.onKeyReleased(key, callback) }
-        \\  static onAnyKey(callback) { Engine.onAnyKey(callback) }
-        \\  static onMousePressed(button, callback) { Engine.onMousePressed(button, callback) }
-        \\  static onMouseMove(callback) { Engine.onMouseMove(callback) }
-        \\  static onTick(callback) { Engine.onTick(callback) }
+        \\  static onKeyPressed(key, callback) { return Engine.onKeyPressed(key, callback) }
+        \\  static onKeyReleased(key, callback) { return Engine.onKeyReleased(key, callback) }
+        \\  static onAnyKey(callback) { return Engine.onAnyKey(callback) }
+        \\  static onMousePressed(button, callback) { return Engine.onMousePressed(button, callback) }
+        \\  static onMouseMove(callback) { return Engine.onMouseMove(callback) }
+        \\  static onTick(callback) { return Engine.onTick(callback) }
         \\}
         \\    
     ;

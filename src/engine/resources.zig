@@ -1,5 +1,14 @@
 const std = @import("std");
 
+extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+extern "c" fn fclose(stream: *anyopaque) c_int;
+extern "c" fn fseek(stream: *anyopaque, offset: c_long, origin: c_int) c_int;
+extern "c" fn ftell(stream: *anyopaque) c_long;
+extern "c" fn fread(ptr: [*]u8, size: usize, count: usize, stream: *anyopaque) usize;
+
+const seek_set = 0;
+const seek_end = 2;
+
 pub const Error = error{
     MissingResource,
     InvalidPath,
@@ -86,15 +95,21 @@ pub fn normalize(path: []const u8) []const u8 {
 }
 
 pub fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const io = std.Io.Threaded.global_single_threaded.io();
-    var file = try std.Io.Dir.cwd().openFile(io, path, .{});
-    defer file.close(io);
+    const zpath = try allocator.dupeZ(u8, path);
+    defer allocator.free(zpath);
 
-    var reader = file.reader(io, &.{});
-    return reader.interface.allocRemaining(allocator, .limited(1 << 20)) catch |err| switch (err) {
-        error.ReadFailed => return reader.err.?,
-        else => |e| return e,
-    };
+    const file = fopen(zpath.ptr, "rb") orelse return error.FileNotFound;
+    defer _ = fclose(file);
+
+    if (fseek(file, 0, seek_end) != 0) return error.ReadFailed;
+    const len = ftell(file);
+    if (len < 0 or len > 1 << 20) return error.ReadFailed;
+    if (fseek(file, 0, seek_set) != 0) return error.ReadFailed;
+
+    const out = try allocator.alloc(u8, @intCast(len));
+    const read_count = fread(out.ptr, 1, out.len, file);
+    if (read_count != out.len) return error.ReadFailed;
+    return out;
 }
 
 test "memory resource provider reads normalized text paths" {

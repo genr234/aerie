@@ -1,6 +1,8 @@
 const rl = @import("raylib");
 const std = @import("std");
 const mem = @import("memory.zig");
+const events = @import("events.zig");
+const story = @import("story.zig");
 
 pub const ConditionFn = *const fn (ctx: ?*anyopaque) bool;
 pub const ActionFn = *const fn (ctx: ?*anyopaque) void;
@@ -9,6 +11,14 @@ pub const Option = struct {
     text: []const u8,
     goto: ?[]const u8 = null,
     condition: ?ConditionFn = null,
+    when: ?[]const u8 = null,
+    actions: []const RuntimeAction = &.{},
+};
+
+pub const RuntimeAction = union(enum) {
+    set_flag: struct { name: []const u8, value: bool = true },
+    change_scene: struct { name: []const u8 },
+    show_message: struct { text: []const u8, duration: f32 = 2.0 },
 };
 
 pub const Node = struct {
@@ -18,8 +28,10 @@ pub const Node = struct {
     options: []const Option = &.{},
     goto: ?[]const u8 = null,
     condition: ?ConditionFn = null,
+    when: ?[]const u8 = null,
     else_goto: ?[]const u8 = null,
     action: ?ActionFn = null,
+    actions: []const RuntimeAction = &.{},
     label: ?[]const u8 = null,
     on_enter: ?ActionFn = null,
     on_exit: ?ActionFn = null,
@@ -29,6 +41,8 @@ pub const Node = struct {
 };
 
 pub const Script = struct {
+    id: []const u8 = "",
+    start: ?[]const u8 = null,
     nodes: []const Node,
     labels: std.StringHashMapUnmanaged(usize),
     allocator: std.mem.Allocator,
@@ -133,6 +147,169 @@ pub const Builder = struct {
     }
 };
 
+pub const JsonError = error{
+    InvalidJson,
+    InvalidType,
+    MissingField,
+    DuplicateNode,
+};
+
+pub fn parseScriptJson(allocator: std.mem.Allocator, text: []const u8) !Script {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, text, .{}) catch return JsonError.InvalidJson;
+    defer parsed.deinit();
+    if (parsed.value != .object) return JsonError.InvalidType;
+
+    const obj = parsed.value.object;
+    const id = try dupString(allocator, try getString(obj, "id"));
+    const nodes_value = obj.get("nodes") orelse return JsonError.MissingField;
+    if (nodes_value != .array) return JsonError.InvalidType;
+
+    const nodes_json = nodes_value.array.items;
+    const extra_done: usize = 1;
+    var nodes = try allocator.alloc(Node, nodes_json.len + extra_done);
+    var labels = std.StringHashMapUnmanaged(usize){};
+    errdefer {
+        allocator.free(nodes);
+        labels.deinit(allocator);
+    }
+
+    for (nodes_json, 0..) |node_value, i| {
+        const node = try parseNode(allocator, node_value);
+        nodes[i] = node;
+        if (node.label) |label| {
+            if (labels.contains(label)) return JsonError.DuplicateNode;
+            try labels.put(allocator, label, i);
+        }
+    }
+    nodes[nodes_json.len] = .{ .tag = .done };
+
+    var start: ?[]const u8 = null;
+    if (obj.get("start")) |start_value| start = try dupString(allocator, try asString(start_value));
+
+    return .{
+        .id = id,
+        .start = start,
+        .nodes = nodes,
+        .labels = labels,
+        .allocator = allocator,
+    };
+}
+
+fn parseNode(allocator: std.mem.Allocator, value: std.json.Value) !Node {
+    if (value != .object) return JsonError.InvalidType;
+    const obj = value.object;
+    const id = try dupString(allocator, try getString(obj, "id"));
+    const speaker = if (obj.get("speaker")) |v| try dupString(allocator, try asString(v)) else "";
+    const text = if (obj.get("text")) |v| try dupString(allocator, try asString(v)) else "";
+    const next = if (obj.get("next")) |v| try dupString(allocator, try asString(v)) else null;
+    const when = if (obj.get("when")) |v| try dupString(allocator, try asString(v)) else null;
+    const actions = if (obj.get("actions")) |v| try parseActions(allocator, v) else &.{};
+
+    if (obj.get("choices")) |choices_value| {
+        return .{
+            .tag = .ask,
+            .speaker = speaker,
+            .text = text,
+            .options = try parseChoices(allocator, choices_value),
+            .goto = next,
+            .when = when,
+            .actions = actions,
+            .label = id,
+        };
+    }
+
+    return .{
+        .tag = .say,
+        .speaker = speaker,
+        .text = text,
+        .goto = next,
+        .when = when,
+        .actions = actions,
+        .label = id,
+    };
+}
+
+fn parseChoices(allocator: std.mem.Allocator, value: std.json.Value) ![]const Option {
+    if (value != .array) return JsonError.InvalidType;
+    const items = value.array.items;
+    const choices = try allocator.alloc(Option, items.len);
+    for (items, 0..) |item, i| {
+        if (item != .object) return JsonError.InvalidType;
+        const obj = item.object;
+        choices[i] = .{
+            .text = try dupString(allocator, try getString(obj, "text")),
+            .goto = if (obj.get("next")) |v| try dupString(allocator, try asString(v)) else null,
+            .when = if (obj.get("when")) |v| try dupString(allocator, try asString(v)) else null,
+            .actions = if (obj.get("actions")) |v| try parseActions(allocator, v) else &.{},
+        };
+    }
+    return choices;
+}
+
+fn parseActions(allocator: std.mem.Allocator, value: std.json.Value) ![]const RuntimeAction {
+    if (value != .array) return JsonError.InvalidType;
+    const items = value.array.items;
+    const actions = try allocator.alloc(RuntimeAction, items.len);
+    for (items, 0..) |item, i| {
+        if (item != .object) return JsonError.InvalidType;
+        const obj = item.object;
+        if (obj.get("setFlag")) |payload| {
+            if (payload != .object) return JsonError.InvalidType;
+            const name = try dupString(allocator, try getString(payload.object, "name"));
+            const value_bool = if (payload.object.get("value")) |v| try asBool(v) else true;
+            actions[i] = .{ .set_flag = .{ .name = name, .value = value_bool } };
+        } else if (obj.get("changeScene")) |payload| {
+            if (payload != .object) return JsonError.InvalidType;
+            const name = try dupString(allocator, try getString(payload.object, "name"));
+            actions[i] = .{ .change_scene = .{ .name = name } };
+        } else if (obj.get("showMessage")) |payload| {
+            if (payload != .object) return JsonError.InvalidType;
+            var duration: f32 = 2.0;
+            if (payload.object.get("duration")) |v| duration = @floatCast(try asFloat(v));
+            actions[i] = .{ .show_message = .{
+                .text = try dupString(allocator, try getString(payload.object, "text")),
+                .duration = duration,
+            } };
+        } else {
+            return JsonError.InvalidType;
+        }
+    }
+    return actions;
+}
+
+fn getString(obj: std.json.ObjectMap, key: []const u8) ![]const u8 {
+    const value = obj.get(key) orelse return JsonError.MissingField;
+    return asString(value);
+}
+
+fn asString(value: std.json.Value) ![]const u8 {
+    return switch (value) {
+        .string => |s| s,
+        else => JsonError.InvalidType,
+    };
+}
+
+fn asBool(value: std.json.Value) !bool {
+    return switch (value) {
+        .bool => |b| b,
+        else => JsonError.InvalidType,
+    };
+}
+
+fn asFloat(value: std.json.Value) !f64 {
+    return switch (value) {
+        .integer => |n| @floatFromInt(n),
+        .float => |n| n,
+        else => JsonError.InvalidType,
+    };
+}
+
+fn dupString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
+    const out = try allocator.alloc(u8, s.len);
+    @memcpy(out, s);
+    return out;
+}
+
 pub const Runner = struct {
     script: *const Script,
     allocator: std.mem.Allocator,
@@ -174,7 +351,15 @@ pub const Runner = struct {
 
     pub fn start(self: *Runner, ctx: ?*anyopaque) void {
         self.context = ctx;
-        self.index = 0;
+        self.index = if (self.script.start) |label| self.script.findLabel(label) orelse 0 else 0;
+        self.phase = .inactive;
+        self.enterNode();
+        self.emit(.started);
+    }
+
+    pub fn startAt(self: *Runner, ctx: ?*anyopaque, label: []const u8) void {
+        self.context = ctx;
+        self.index = self.script.findLabel(label) orelse 0;
         self.phase = .inactive;
         self.enterNode();
         self.emit(.started);
@@ -275,7 +460,14 @@ pub const Runner = struct {
             self.emit(.finished);
             return;
         };
+        if (node.when) |condition| {
+            if (!self.checkCondition(condition)) {
+                self.jumpTo(node.goto);
+                return;
+            }
+        }
         if (node.on_enter) |cb| cb(self.context);
+        self.runActions(node.actions);
         self.emit(.node_entered);
         switch (node.tag) {
             .say => {
@@ -327,8 +519,36 @@ pub const Runner = struct {
         self.available.clearRetainingCapacity();
         self.choice_idx = 0;
         for (node.options, 0..) |opt, i| {
-            const ok = if (opt.condition) |c| c(self.context) else true;
+            const ok = if (opt.when) |condition|
+                self.checkCondition(condition)
+            else if (opt.condition) |c|
+                c(self.context)
+            else
+                true;
             if (ok) self.available.append(i) catch {};
+        }
+    }
+
+    fn checkCondition(self: *Runner, condition: []const u8) bool {
+        const state_ptr = self.context orelse return condition.len == 0;
+        const state: *story.StoryState = @ptrCast(@alignCast(state_ptr));
+        return state.checkCondition(condition);
+    }
+
+    fn runActions(self: *Runner, actions: []const RuntimeAction) void {
+        if (actions.len == 0) return;
+        const state_ptr = self.context orelse return;
+        const state: *story.StoryState = @ptrCast(@alignCast(state_ptr));
+        for (actions) |action| {
+            switch (action) {
+                .set_flag => |payload| state.setFlag(payload.name, payload.value),
+                .change_scene => |payload| {
+                    if (state.eventQueue) |queue| queue.push(events.changeSceneByName(payload.name)) catch {};
+                },
+                .show_message => |payload| {
+                    if (state.eventQueue) |queue| queue.push(events.showMessage(payload.text, payload.duration)) catch {};
+                },
+            }
         }
     }
 
@@ -344,6 +564,7 @@ pub const Runner = struct {
             if (node.on_exit) |cb| cb(self.context);
             if (self.choice_idx < self.available.items.len) {
                 const opt = node.options[self.available.items[self.choice_idx]];
+                self.runActions(opt.actions);
                 self.emit(.choice_made);
                 self.jumpTo(opt.goto);
             }

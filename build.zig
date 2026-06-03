@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
+    const project_root = b.option([]const u8, "project-root", "Project root to preload for Emscripten web builds") orelse ".";
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -186,6 +187,11 @@ pub fn build(b: *std.Build) void {
     wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/include"));
     wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/vm"));
     wren_lib.root_module.addIncludePath(b.path("src/third-party/wren/src/optional"));
+    if (target.query.os_tag == .emscripten) {
+        const emsdk_dep = b.dependency("emsdk", .{});
+        wren_lib.root_module.addSystemIncludePath(emsdk_dep.path("upstream/emscripten/cache/sysroot/include"));
+        wren_lib.root_module.addSystemIncludePath(emsdk_dep.path("upstream/lib/clang/21/include"));
+    }
 
     wren_lib.root_module.addCSourceFiles(.{
         .root = b.path("src/third-party/wren/src"),
@@ -234,7 +240,10 @@ pub fn build(b: *std.Build) void {
         const emcc_settings = emsdk.emccDefaultSettings(b.allocator, .{ .optimize = optimize });
 
         var emcc_flags = default_emcc_flags.clone() catch @panic("OOM");
-        emcc_flags.put("--preload-file=assets@/assets", {}) catch @panic("OOM");
+        const preload_assets = std.fmt.allocPrint(b.allocator, "--preload-file={s}/assets@/assets", .{project_root}) catch @panic("OOM");
+        const preload_manifest = std.fmt.allocPrint(b.allocator, "--preload-file={s}/game.json@/game.json", .{project_root}) catch @panic("OOM");
+        emcc_flags.put(preload_assets, {}) catch @panic("OOM");
+        emcc_flags.put(preload_manifest, {}) catch @panic("OOM");
 
         const emcc_step = emsdk.emccStep(b, raylib_artifact, wasm, .{
             .optimize = optimize,
@@ -243,15 +252,6 @@ pub fn build(b: *std.Build) void {
             .install_dir = install_dir,
         });
         b.getInstallStep().dependOn(emcc_step);
-
-        // Copy assets to web directory
-        const copy_assets = b.addInstallDirectory(.{
-            .source_dir = b.path("assets"),
-            .install_dir = install_dir,
-            .install_subdir = "assets",
-        });
-
-        b.getInstallStep().dependOn(&copy_assets.step);
 
         const html_filename = std.fmt.allocPrint(b.allocator, "{s}.html", .{wasm.name}) catch {
             return;

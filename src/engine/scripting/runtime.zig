@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const wren_c = @import("wren_c.zig");
+const log = @import("../log.zig");
 const loader_mod = @import("loader.zig");
 const api = @import("api.zig");
 const context = @import("context.zig");
@@ -193,7 +194,7 @@ pub const Runtime = struct {
         const interpret_res = wren_c.c.wrenInterpret(vm, module_name.ptr, zsrc.ptr);
         if (interpret_res != wren_c.c.WREN_RESULT_SUCCESS) {
             if (self.last_error_len > 0) {
-                std.debug.print("[wren] interpret error: {s}\\n", .{self.last_error[0..self.last_error_len]});
+                log.debug("[wren] interpret error: {s}\\n", .{self.last_error[0..self.last_error_len]});
             }
             return error.WrenLoadFailed;
         }
@@ -210,7 +211,7 @@ pub const Runtime = struct {
         if (slot_type == wren_c.c.WREN_TYPE_NULL or slot_type == wren_c.c.WREN_TYPE_BOOL or
             slot_type == wren_c.c.WREN_TYPE_NUM or slot_type == wren_c.c.WREN_TYPE_STRING)
         {
-            std.debug.print("[wren] getVariable '{s}' in module '{s}' returned type {d}, expected class\n", .{ self.entry_class, module_name, slot_type });
+            log.debug("[wren] getVariable '{s}' in module '{s}' returned type {d}, expected class\n", .{ self.entry_class, module_name, slot_type });
             return error.WrenLoadFailed;
         }
         self.game_class = wren_c.c.wrenGetSlotHandle(vm, 0);
@@ -228,7 +229,7 @@ pub const Runtime = struct {
         // value will be null/invalid and calls will fail with a runtime error.
         // We'll rely on the call result + errorFn for diagnostics.
         if (!wren_c.c.wrenHasModule(vm, module_name.ptr)) {
-            std.debug.print("[wren] module not loaded: {s}\\n", .{module_name});
+            log.debug("[wren] module not loaded: {s}\\n", .{module_name});
         }
 
         // call once on init.
@@ -246,9 +247,9 @@ pub const Runtime = struct {
 
         const res = wren_c.c.wrenCall(vm, self.on_boot.?);
         if (res != wren_c.c.WREN_RESULT_SUCCESS) {
-            std.debug.print("[wren] onBoot call failed res={d}\n", .{@as(u32, @intCast(res))});
+            log.debug("[wren] onBoot call failed res={d}\n", .{@as(u32, @intCast(res))});
             if (self.last_error_len > 0) {
-                std.debug.print("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
+                log.debug("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
             }
         }
         return res == wren_c.c.WREN_RESULT_SUCCESS;
@@ -268,9 +269,9 @@ pub const Runtime = struct {
 
         const res = wren_c.c.wrenCall(vm, on_update);
         if (res != wren_c.c.WREN_RESULT_SUCCESS) {
-            std.debug.print("[wren] onUpdate call failed res={d}\n", .{@as(u32, @intCast(res))});
+            log.debug("[wren] onUpdate call failed res={d}\n", .{@as(u32, @intCast(res))});
             if (self.last_error_len > 0) {
-                std.debug.print("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
+                log.debug("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
             }
             // Stop further calls if we get an error.
             self.boot_ok = false;
@@ -291,9 +292,9 @@ pub const Runtime = struct {
 
         const res = wren_c.c.wrenCall(vm, on_draw);
         if (res != wren_c.c.WREN_RESULT_SUCCESS) {
-            std.debug.print("[wren] onDraw call failed res={d}\n", .{@as(u32, @intCast(res))});
+            log.debug("[wren] onDraw call failed res={d}\n", .{@as(u32, @intCast(res))});
             if (self.last_error_len > 0) {
-                std.debug.print("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
+                log.debug("[wren] last error: {s}\n", .{self.last_error[0..self.last_error_len]});
             }
             // Stop further calls if we get an error.
             self.boot_ok = false;
@@ -337,7 +338,7 @@ pub const Runtime = struct {
     fn writeFn(vm: ?*wren_c.c.WrenVM, text: [*c]const u8) callconv(.c) void {
         _ = vm;
         if (text == null) return;
-        std.debug.print("[wren] {s}", .{std.mem.span(text)});
+        log.debug("[wren] {s}", .{std.mem.span(text)});
     }
 
     fn errorFn(
@@ -366,7 +367,7 @@ pub const Runtime = struct {
         rt.last_error_len = n;
 
         const mod_name: []const u8 = if (module) |m| std.mem.span(m) else "<none>";
-        std.debug.print("[wren:{s}] {s}:{d}: {s}\\n", .{ t, mod_name, line, msg });
+        log.debug("[wren:{s}] {s}:{d}: {s}\\n", .{ t, mod_name, line, msg });
     }
 
     fn normalizeKeyString(name: []const u8) ?i32 {

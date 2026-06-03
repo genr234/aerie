@@ -11,6 +11,7 @@ pub const SceneIR = struct {
     scene_type: SceneType = .exploration,
     width: i32 = 800,
     height: i32 = 450,
+    background_color: ?rl.Color = null,
     entities: []EntityIR,
 };
 
@@ -39,6 +40,11 @@ pub const SpriteIR = struct {
     texture: []const u8,
     flip_x: bool = false,
     tint: ?rl.Color = null,
+    frame_width: f32 = 0,
+    frame_height: f32 = 0,
+    frames: usize = 1,
+    fps: f32 = 0,
+    loop: bool = true,
 };
 
 pub const CircleIR = struct {
@@ -70,7 +76,7 @@ pub const TriggerIR = struct {
 };
 
 pub const TriggerActionIR = union(enum) {
-    StartDialogue: struct { label: ?[]const u8 = null },
+    StartDialogue: struct { id: ?[]const u8 = null, label: ?[]const u8 = null },
     ShowMessage: struct { text: []const u8, duration: f32 = 2.0 },
     ChangeScene: struct { index: ?usize = null, name: ?[]const u8 = null },
     SetFlag: struct { name: []const u8, value: bool = true },

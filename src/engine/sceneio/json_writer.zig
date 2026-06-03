@@ -86,6 +86,18 @@ fn writeComponent(stream: *std.json.Stringify, component: types.ComponentIR) !vo
                 try stream.objectField("tint");
                 try writeColor(stream, tint);
             }
+            if (value.frames > 1) {
+                try stream.objectField("frameWidth");
+                try stream.write(value.frame_width);
+                try stream.objectField("frameHeight");
+                try stream.write(value.frame_height);
+                try stream.objectField("frames");
+                try stream.write(value.frames);
+                try stream.objectField("fps");
+                try stream.write(value.fps);
+                try stream.objectField("loop");
+                try stream.write(value.loop);
+            }
             try stream.endObject();
         },
         .Circle => |value| {
