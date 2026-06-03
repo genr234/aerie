@@ -2,9 +2,15 @@
 zig-out
 .idea
 .idea_modules/
-reference/
+/reference/
 .DS_Store
 .bazelbsp/
 .codex/
 .tools/
 zig-pkg/
+append_actions.tmp
+.playwright-mcp/
+frontend/dist/
+frontend/node_modules/
+src-tauri/gen/schemas/
+src-tauri/target/

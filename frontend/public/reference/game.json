@@ -1,0 +1,15 @@
+{
+  "id": "reference-slice",
+  "title": "Reference Slice",
+  "version": "0.1.0",
+  "entry": { "module": "main", "class": "Game" },
+  "start_scene": "crossroads",
+  "scenes": [
+    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
+    { "name": "clearing", "path": "assets/reference-game/clearing.json" }
+  ],
+  "scripts": [
+    { "name": "main", "path": "assets/scripts/main.wren" }
+  ],
+  "window": { "width": 800, "height": 450, "title": "Reference Slice" }
+}

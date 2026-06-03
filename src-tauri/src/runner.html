@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aerie Export</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #20242a; color: #f6f3ec; font-family: system-ui, sans-serif; }
+    #game { width: 100vw; height: 100vh; display: block; background: #f4f1e8; }
+    #dialogue { position: fixed; left: 24px; right: 24px; bottom: 24px; min-height: 120px; padding: 18px 20px; background: rgba(32,36,42,.92); border: 2px solid #d4b47d; box-sizing: border-box; display: none; }
+    #speaker { font-weight: 700; color: #f7d96b; margin-bottom: 8px; }
+    #choices { display: grid; gap: 8px; margin-top: 14px; }
+    #choices button { text-align: left; padding: 10px 12px; border: 1px solid #d4b47d; background: #2e3640; color: #f6f3ec; }
+    #message { position: fixed; top: 18px; left: 18px; padding: 10px 14px; background: rgba(32,36,42,.9); display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="800" height="450"></canvas>
+  <div id="message"></div>
+  <div id="dialogue">
+    <div id="speaker"></div>
+    <div id="line"></div>
+    <div id="choices"></div>
+  </div>
+  <script>
+    const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const dialogueEl = document.getElementById('dialogue');
+const speakerEl = document.getElementById('speaker');
+const lineEl = document.getElementById('line');
+const choicesEl = document.getElementById('choices');
+const messageEl = document.getElementById('message');
+
+let project, scene, dialogue, node, flags = {};
+const images = new Map();
+
+async function loadJson(path) {
+  const response = await fetch(path);
+  if (!response.ok) throw new Error(`Failed to load ${path}`);
+  return response.json();
+}
+
+function check(condition) {
+  if (!condition) return true;
+  condition = condition.trim();
+  if (condition.startsWith('!')) return !flags[condition.slice(1)];
+  return !!flags[condition];
+}
+
+function showMessage(text, duration = 2) {
+  messageEl.textContent = text;
+  messageEl.style.display = 'block';
+  setTimeout(() => messageEl.style.display = 'none', duration * 1000);
+}
+
+async function changeScene(name) {
+  const decl = project.scenes.find((item) => item.name === name || item.path === name);
+  if (!decl) return showMessage(`Missing scene ${name}`, 3);
+  scene = await loadJson(decl.path);
+  await preloadSceneImages();
+  draw();
+}
+
+function runActions(actions = []) {
+  for (const action of actions) {
+    if (action.setFlag) flags[action.setFlag.name] = action.setFlag.value !== false;
+    if (action.showMessage) showMessage(action.showMessage.text || '', action.showMessage.duration || 2);
+    if (action.changeScene) changeScene(action.changeScene.name);
+  }
+}
+
+function startDialogue(id, label) {
+  const decl = project.dialogues?.find((item) => !id || item.name === id);
+  if (!decl) return showMessage('No dialogue asset declared.', 3);
+  loadJson(decl.path).then((doc) => {
+    dialogue = doc;
+    showNode(label || doc.start || doc.nodes[0]?.id);
+  });
+}
+
+function showNode(id) {
+  node = dialogue.nodes.find((item) => item.id === id);
+  if (!node || !check(node.when)) return stopDialogue();
+  runActions(node.actions);
+  dialogueEl.style.display = 'block';
+  speakerEl.textContent = node.speaker || '';
+  lineEl.textContent = node.text || '';
+  choicesEl.innerHTML = '';
+  const choices = (node.choices || []).filter((choice) => check(choice.when));
+  for (const choice of choices) {
+    const button = document.createElement('button');
+    button.textContent = choice.text;
+    button.onclick = () => {
+      runActions(choice.actions);
+      choice.next ? showNode(choice.next) : stopDialogue();
+    };
+    choicesEl.appendChild(button);
+  }
+  if (choices.length === 0) choicesEl.innerHTML = '<button>Continue</button>';
+  if (choices.length === 0) choicesEl.firstChild.onclick = () => node.next ? showNode(node.next) : stopDialogue();
+}
+
+function stopDialogue() {
+  dialogueEl.style.display = 'none';
+  dialogue = null;
+  node = null;
+}
+
+async function preloadSceneImages() {
+  for (const entity of scene.entities || []) {
+    const texture = entity.components?.Sprite?.texture;
+    if (!texture || images.has(texture)) continue;
+    const img = new Image();
+    img.src = texture.startsWith('assets/') ? texture : `assets/${texture}`;
+    await img.decode().catch(() => {});
+    images.set(texture, img);
+  }
+}
+
+function draw() {
+  const size = scene.size || {};
+  canvas.width = size.width || 800;
+  canvas.height = size.height || 450;
+  ctx.fillStyle = scene.background?.color || '#f4f1e8';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  for (const entity of scene.entities || []) {
+    const components = entity.components || {};
+    const t = components.Transform || {};
+    const pos = t.position || [0, 0];
+    if (components.Rect) {
+      ctx.fillStyle = components.Rect.color || '#86b56b';
+      ctx.fillRect(pos[0], pos[1], components.Rect.width || 32, components.Rect.height || 32);
+    }
+    if (components.Circle) {
+      ctx.fillStyle = components.Circle.color || '#f7d96b';
+      ctx.beginPath();
+      ctx.arc(pos[0], pos[1], components.Circle.radius || 16, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (components.Sprite) {
+      const img = images.get(components.Sprite.texture);
+      if (img?.complete && img.naturalWidth) ctx.drawImage(img, pos[0], pos[1], 64, 64);
+      else { ctx.fillStyle = '#d65a4a'; ctx.fillRect(pos[0], pos[1], 64, 64); }
+    }
+  }
+}
+
+canvas.addEventListener('click', (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (event.clientX - rect.left) * canvas.width / rect.width;
+  const y = (event.clientY - rect.top) * canvas.height / rect.height;
+  for (const entity of scene.entities || []) {
+    const trigger = entity.components?.Trigger;
+    if (!trigger) continue;
+    const b = trigger.bounds || [0, 0, 0, 0];
+    if (x >= b[0] && y >= b[1] && x <= b[0] + b[2] && y <= b[1] + b[3]) {
+      const action = trigger.action || {};
+      if (action.startDialogue) startDialogue(action.startDialogue.id, action.startDialogue.label);
+      if (action.showMessage) showMessage(action.showMessage.text || '', action.showMessage.duration || 2);
+      if (action.changeScene) changeScene(action.changeScene.name);
+      if (action.setFlag) flags[action.setFlag.name] = action.setFlag.value !== false;
+    }
+  }
+});
+
+(async function boot() {
+  project = await loadJson('game.json');
+  await changeScene(project.start_scene);
+})().catch((error) => showMessage(error.message, 10));
+</script>
+</body>
+</html>
