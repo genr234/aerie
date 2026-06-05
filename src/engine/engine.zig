@@ -15,6 +15,7 @@ const resources = @import("resources.zig");
 const ui = @import("ui.zig");
 const state = @import("state.zig");
 const vn = @import("vn.zig");
+const combat = @import("combat.zig");
 
 const scripting = @import("scripting/runtime.zig");
 const scripting_context = @import("scripting/context.zig");
@@ -25,6 +26,7 @@ const sceneio_types = @import("sceneio/types.zig");
 
 pub const screenWidth = 800;
 pub const screenHeight = 450;
+const maxFrameDt: f32 = 1.0 / 15.0;
 
 pub const Engine = struct {
     gameState: state.GameState = undefined,
@@ -66,6 +68,11 @@ pub const Engine = struct {
         // Systems
         self.gameState.eventQueue = events.EventQueue.init();
         self.gameState.storyState = story.StoryState.initWithEvents(&self.gameState.eventQueue);
+        const combat_db = if (bundle.combatSource()) |source|
+            try combat.parseDatabaseJson(mem.permanent(), source)
+        else
+            combat.Database.empty();
+        self.gameState.combatState = combat.BattleState.init(combat_db, &self.gameState.storyState);
 
         if (bundle.dialogues.len > 0) {
             self.gameState.script = try dialogue.parseScriptJson(mem.permanent(), bundle.dialogues[0].source);
@@ -151,6 +158,7 @@ pub const Engine = struct {
             .gameDialogue = &self.gameState.gameDialogue,
             .vnDialogue = &self.gameState.vnDialogue,
             .vnActive = &self.gameState.vnActive,
+            .combatState = &self.gameState.combatState,
         };
         self.wrenRuntime = scripting.Runtime.init(mem.permanent(), &self.scriptCtx, bundle.asset_root, bundle.scripts, bundle.resources, project_cfg.entry_module, project_cfg.entry_class) catch |err| blk: {
             log.debug("[wren] runtime init failed: {any}\n", .{err});
@@ -192,7 +200,7 @@ pub const Engine = struct {
         if (!self.initialized) return;
 
         mem.resetFrame();
-        const dt = rl.getFrameTime();
+        const dt = @min(rl.getFrameTime(), maxFrameDt);
 
         if (rl.isKeyPressed(.v)) {
             if (!self.gameState.vnActive) {
@@ -205,16 +213,20 @@ pub const Engine = struct {
             }
         }
 
+        self.syncCombatMode();
+
         if (self.modeStack.top()) |mode| {
             mode.update(self, dt);
         }
 
-        if (self.wrenRuntime) |*rt| {
-            if (builtin.os.tag != .emscripten) {
-                rt.reloadIfChanged();
+        if (!self.gameState.combatState.active) {
+            if (self.wrenRuntime) |*rt| {
+                if (builtin.os.tag != .emscripten) {
+                    rt.reloadIfChanged();
+                }
+                rt.dispatchInput(dt);
+                _ = rt.callOnUpdate(dt);
             }
-            rt.dispatchInput(dt);
-            _ = rt.callOnUpdate(dt);
         }
 
         self.gameState.eventQueue.process(dt);
@@ -231,6 +243,22 @@ pub const Engine = struct {
         }
 
         rl.endDrawing();
+    }
+
+    fn syncCombatMode(self: *Self) void {
+        const top_is_combat = if (self.modeStack.top()) |mode| mode == @constCast(&CombatMode) else false;
+        if (self.gameState.combatState.active and !top_is_combat) {
+            self.modeStack.push(@constCast(&CombatMode)) catch {};
+        } else if (!self.gameState.combatState.active and top_is_combat) {
+            _ = self.modeStack.pop();
+            if (self.gameState.combatState.exit_scene_len > 0) {
+                const name = self.gameState.combatState.exit_scene[0..self.gameState.combatState.exit_scene_len];
+                self.gameState.manager.changeSceneByName(name) catch |err| {
+                    log.debug("Combat exit scene failed for '{s}': {any}\n", .{ name, err });
+                };
+                self.gameState.combatState.exit_scene_len = 0;
+            }
+        }
     }
 };
 
@@ -380,7 +408,9 @@ fn explorationDraw(_: *Mode, engine: *Engine) void {
         rl.beginMode2D(camera);
         ecs.Systems.render(&currentScene.world);
         rl.endMode2D();
+        ecs.Systems.drawInteractionPrompt(&currentScene.world);
     } else |_| {
+        ecs.Systems.render(&currentScene.world);
         rl.drawText("No Active Camera!", 200, 200, 30, rl.Color.red);
     }
 
@@ -396,8 +426,6 @@ fn explorationDraw(_: *Mode, engine: *Engine) void {
         .height = 100,
     };
     dialogue.draw(&engine.gameState.gameDialogue, dialogueBounds, .{});
-
-    engine.gameState.manager.draw();
 
     // Call Wren onDraw for custom UI
     if (engine.wrenRuntime) |*rt| {
@@ -419,6 +447,8 @@ fn explorationDraw(_: *Mode, engine: *Engine) void {
             else => {},
         }
     }
+
+    engine.gameState.manager.drawTransitionOverlay();
 }
 
 pub const VNMode = Mode{
@@ -433,4 +463,19 @@ fn vnUpdate(_: *Mode, engine: *Engine, dt: f32) void {
 
 fn vnDraw(_: *Mode, engine: *Engine) void {
     engine.gameState.vnState.draw();
+}
+
+pub const CombatMode = Mode{
+    .updateFn = combatUpdate,
+    .drawFn = combatDraw,
+};
+
+fn combatUpdate(_: *Mode, engine: *Engine, dt: f32) void {
+    engine.gameState.combatState.handleInput();
+    engine.gameState.combatState.update(dt);
+    engine.gameState.combatState.confirmExit();
+}
+
+fn combatDraw(_: *Mode, engine: *Engine) void {
+    engine.gameState.combatState.draw(rl.getScreenWidth(), rl.getScreenHeight());
 }

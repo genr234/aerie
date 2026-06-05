@@ -10,6 +10,8 @@ pub const JsonError = error{
     InvalidValue,
 };
 
+const ParseError = JsonError || std.mem.Allocator.Error;
+
 pub fn loadSceneIR(allocator: std.mem.Allocator, path: []const u8) !types.SceneIR {
     const io = std.Io.Threaded.global_single_threaded.io();
     var file = try std.Io.Dir.cwd().openFile(io, path, .{});
@@ -168,6 +170,22 @@ fn parseComponent(allocator: std.mem.Allocator, key: []const u8, v: std.json.Val
         return .{ .Trigger = try parseTrigger(allocator, v) };
     }
 
+    if (std.mem.eql(u8, key, "BoxCollider")) {
+        return .{ .BoxCollider = try parseBoxCollider(v) };
+    }
+
+    if (std.mem.eql(u8, key, "Interactable")) {
+        return .{ .Interactable = try parseInteractable(allocator, v) };
+    }
+
+    if (std.mem.eql(u8, key, "Portal")) {
+        return .{ .Portal = try parsePortal(allocator, v) };
+    }
+
+    if (std.mem.eql(u8, key, "SpawnPoint")) {
+        return .{ .SpawnPoint = try parseSpawnPoint(allocator, v) };
+    }
+
     return JsonError.InvalidValue;
 }
 
@@ -239,6 +257,8 @@ fn parseCamera(allocator: std.mem.Allocator, v: std.json.Value) !types.CameraIR 
 
     if (v.object.get("rotation")) |r| out.rotation = @floatCast(try asFloat(r));
     if (v.object.get("zoom")) |z| out.zoom = @floatCast(try asFloat(z));
+    if (v.object.get("smoothing")) |s| out.smoothing = @floatCast(try asFloat(s));
+    if (v.object.get("clampToScene")) |c| out.clamp_to_scene = try asBool(c);
     if (v.object.get("followTag")) |ft| out.follow_tag = try dupString(allocator, try asString(ft));
 
     return out;
@@ -249,6 +269,9 @@ fn parsePlayerController(v: std.json.Value) !types.PlayerControllerIR {
 
     var out: types.PlayerControllerIR = .{};
     if (v.object.get("speed")) |s| out.speed = @floatCast(try asFloat(s));
+    if (v.object.get("mode")) |m| out.mode = try parseMovementMode(try asString(m));
+    if (v.object.get("stepSize")) |s| out.step_size = @floatCast(try asFloat(s));
+    if (v.object.get("stepTime")) |s| out.step_time = @floatCast(try asFloat(s));
     return out;
 }
 
@@ -327,7 +350,7 @@ fn parseTrigger(allocator: std.mem.Allocator, v: std.json.Value) !types.TriggerI
     if (v != .object) return JsonError.InvalidType;
 
     const bounds_val = v.object.get("bounds") orelse return JsonError.MissingField;
-    const action_val = v.object.get("action") orelse return JsonError.MissingField;
+    const action_val = v.object.get("action");
 
     var one_shot = false;
     if (v.object.get("oneShot")) |o| one_shot = try asBool(o);
@@ -335,12 +358,60 @@ fn parseTrigger(allocator: std.mem.Allocator, v: std.json.Value) !types.TriggerI
     return .{
         .bounds = try parseRect4(bounds_val),
         .one_shot = one_shot,
-        .action = try parseTriggerAction(allocator, action_val),
+        .action = if (v.object.get("actions")) |actions| try parseActionSequence(allocator, actions) else try parseTriggerAction(allocator, action_val orelse return JsonError.MissingField),
     };
 }
 
-fn parseTriggerAction(allocator: std.mem.Allocator, v: std.json.Value) !types.TriggerActionIR {
+fn parseBoxCollider(v: std.json.Value) !types.BoxColliderIR {
     if (v != .object) return JsonError.InvalidType;
+    const wv = v.object.get("width") orelse return JsonError.MissingField;
+    const hv = v.object.get("height") orelse return JsonError.MissingField;
+    var out = types.BoxColliderIR{ .width = @floatCast(try asFloat(wv)), .height = @floatCast(try asFloat(hv)) };
+    if (v.object.get("offset")) |offset| out.offset = try parseVec2(offset);
+    return out;
+}
+
+fn parseInteractable(allocator: std.mem.Allocator, v: std.json.Value) !types.InteractableIR {
+    if (v != .object) return JsonError.InvalidType;
+    const bounds_val = v.object.get("bounds") orelse return JsonError.MissingField;
+    var prompt = try dupString(allocator, "Interact");
+    if (v.object.get("prompt")) |p| prompt = try dupString(allocator, try asString(p));
+    var repeatable = true;
+    if (v.object.get("repeatable")) |r| repeatable = try asBool(r);
+    const action = if (v.object.get("actions")) |actions| try parseActionSequence(allocator, actions) else try parseTriggerAction(allocator, v.object.get("action") orelse return JsonError.MissingField);
+    return .{
+        .bounds = try parseRect4(bounds_val),
+        .prompt = prompt,
+        .repeatable = repeatable,
+        .action = action,
+    };
+}
+
+fn parsePortal(allocator: std.mem.Allocator, v: std.json.Value) !types.PortalIR {
+    if (v != .object) return JsonError.InvalidType;
+    const bounds_val = v.object.get("bounds") orelse return JsonError.MissingField;
+    const scene_val = v.object.get("scene") orelse return JsonError.MissingField;
+    var spawn: ?[]const u8 = null;
+    if (v.object.get("spawn")) |s| spawn = try dupString(allocator, try asString(s));
+    return .{
+        .bounds = try parseRect4(bounds_val),
+        .scene = try dupString(allocator, try asString(scene_val)),
+        .spawn = spawn,
+    };
+}
+
+fn parseSpawnPoint(allocator: std.mem.Allocator, v: std.json.Value) !types.SpawnPointIR {
+    if (v != .object) return JsonError.InvalidType;
+    const name_val = v.object.get("name") orelse return JsonError.MissingField;
+    return .{ .name = try dupString(allocator, try asString(name_val)) };
+}
+
+fn parseTriggerAction(allocator: std.mem.Allocator, v: std.json.Value) ParseError!types.TriggerActionIR {
+    if (v != .object) return JsonError.InvalidType;
+
+    if (v.object.get("actions")) |actions| {
+        return try parseActionSequence(allocator, actions);
+    }
 
     if (v.object.get("startDialogue")) |sd| {
         if (sd != .object) return JsonError.InvalidType;
@@ -376,6 +447,28 @@ fn parseTriggerAction(allocator: std.mem.Allocator, v: std.json.Value) !types.Tr
         return .{ .SetFlag = .{ .name = try dupString(allocator, try asString(name_val)), .value = value } };
     }
 
+    if (v.object.get("startCombat")) |sc| {
+        if (sc != .object) return JsonError.InvalidType;
+        const encounter_val = sc.object.get("encounter") orelse return JsonError.MissingField;
+        return .{ .StartCombat = .{ .encounter = try dupString(allocator, try asString(encounter_val)) } };
+    }
+
+    return JsonError.InvalidValue;
+}
+
+fn parseActionSequence(allocator: std.mem.Allocator, v: std.json.Value) ParseError!types.TriggerActionIR {
+    if (v != .array) return JsonError.InvalidType;
+    const out = try allocator.alloc(types.TriggerActionIR, v.array.items.len);
+    for (v.array.items, 0..) |item, i| {
+        out[i] = try parseTriggerAction(allocator, item);
+    }
+    return .{ .Sequence = out };
+}
+
+fn parseMovementMode(s: []const u8) !types.MovementModeIR {
+    if (std.mem.eql(u8, s, "smooth4")) return .smooth4;
+    if (std.mem.eql(u8, s, "smooth8")) return .smooth8;
+    if (std.mem.eql(u8, s, "grid4")) return .grid4;
     return JsonError.InvalidValue;
 }
 

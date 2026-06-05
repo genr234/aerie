@@ -4,6 +4,7 @@ const rl = @import("raylib");
 const vn = @import("vn.zig");
 const story = @import("story.zig");
 const events = @import("events.zig");
+const combat = @import("combat.zig");
 
 pub const GameState = struct {
     manager: *scenes.SceneManager,
@@ -21,4 +22,5 @@ pub const GameState = struct {
 
     storyState: story.StoryState,
     eventQueue: events.EventQueue,
+    combatState: combat.BattleState,
 };

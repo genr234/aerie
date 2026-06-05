@@ -82,10 +82,40 @@ pub const RectRenderer = struct {
 pub const PlayerController = struct {
     speed: f32 = 100,
     paused: bool = false,
+    mode: MovementMode = .smooth4,
+    facing: Direction = .down,
+    step_size: f32 = 16,
+    step_time: f32 = 0.12,
+    step_from: rl.Vector2 = .{ .x = 0, .y = 0 },
+    step_to: rl.Vector2 = .{ .x = 0, .y = 0 },
+    step_elapsed: f32 = 0,
+    stepping: bool = false,
 };
 
 pub const Solid = struct {
     enabled: bool = true,
+};
+
+pub const MovementMode = enum {
+    smooth4,
+    smooth8,
+    grid4,
+};
+
+pub const Direction = enum {
+    down,
+    up,
+    left,
+    right,
+
+    pub fn vector(self: Direction) rl.Vector2 {
+        return switch (self) {
+            .down => .{ .x = 0, .y = 1 },
+            .up => .{ .x = 0, .y = -1 },
+            .left => .{ .x = -1, .y = 0 },
+            .right => .{ .x = 1, .y = 0 },
+        };
+    }
 };
 
 pub const AnimationClip = struct {
@@ -175,6 +205,9 @@ pub const Camera = struct {
     rotation: f32 = 0,
     zoom: f32 = 1.0,
     follow_target: Entity = Entity.INVALID,
+    smoothing: f32 = 10,
+    clamp_to_scene: bool = true,
+    dead_zone: rl.Vector2 = .{ .x = 0, .y = 0 },
     shake_time: f32 = 0,
     shake_duration: f32 = 0,
     shake_intensity: f32 = 0,
@@ -213,6 +246,11 @@ pub const TriggerAction = union(enum) {
         name_len: usize,
         value: bool,
     },
+    start_combat: struct {
+        encounter: [events.MAX_ID_LEN]u8,
+        encounter_len: usize = 0,
+    },
+    sequence: []const TriggerAction,
     run_action: dialogue.ActionFn,
 };
 
@@ -255,6 +293,18 @@ pub fn TriggerRunAction(action: dialogue.ActionFn) TriggerAction {
     return TriggerAction{ .run_action = action };
 }
 
+pub fn TriggerStartCombat(encounter: []const u8) TriggerAction {
+    var out: TriggerAction = .{ .start_combat = .{
+        .encounter = [_]u8{0} ** events.MAX_ID_LEN,
+        .encounter_len = 0,
+    } };
+    const len = @min(encounter.len, events.MAX_ID_LEN - 1);
+    @memcpy(out.start_combat.encounter[0..len], encounter[0..len]);
+    out.start_combat.encounter[len] = 0;
+    out.start_combat.encounter_len = len;
+    return out;
+}
+
 pub const Trigger = struct {
     bounds: rl.Rectangle,
     action: TriggerAction,
@@ -280,6 +330,78 @@ pub const BoxCollider = struct {
             .width = self.width * @abs(transform.scale.x),
             .height = self.height * @abs(transform.scale.y),
         };
+    }
+};
+
+pub const Interactable = struct {
+    bounds: rl.Rectangle,
+    action: TriggerAction,
+    prompt: [64]u8 = [_]u8{0} ** 64,
+    prompt_len: usize = 0,
+    repeatable: bool = true,
+    used: bool = false,
+
+    pub fn init(bounds: rl.Rectangle, action: TriggerAction, prompt: []const u8, repeatable: bool) Interactable {
+        var out = Interactable{ .bounds = bounds, .action = action, .repeatable = repeatable };
+        const len = @min(prompt.len, out.prompt.len - 1);
+        @memcpy(out.prompt[0..len], prompt[0..len]);
+        out.prompt[len] = 0;
+        out.prompt_len = len;
+        return out;
+    }
+
+    pub fn promptText(self: *const Interactable) []const u8 {
+        return self.prompt[0..self.prompt_len];
+    }
+};
+
+pub const Portal = struct {
+    bounds: rl.Rectangle,
+    scene: [events.MAX_ID_LEN]u8 = [_]u8{0} ** events.MAX_ID_LEN,
+    scene_len: usize = 0,
+    spawn: [events.MAX_ID_LEN]u8 = [_]u8{0} ** events.MAX_ID_LEN,
+    spawn_len: usize = 0,
+
+    pub fn init(bounds: rl.Rectangle, scene_name: []const u8, spawn_name: ?[]const u8) Portal {
+        var out = Portal{ .bounds = bounds };
+        const scene_len = @min(scene_name.len, events.MAX_ID_LEN - 1);
+        @memcpy(out.scene[0..scene_len], scene_name[0..scene_len]);
+        out.scene[scene_len] = 0;
+        out.scene_len = scene_len;
+        if (spawn_name) |name| {
+            const spawn_len = @min(name.len, events.MAX_ID_LEN - 1);
+            @memcpy(out.spawn[0..spawn_len], name[0..spawn_len]);
+            out.spawn[spawn_len] = 0;
+            out.spawn_len = spawn_len;
+        }
+        return out;
+    }
+
+    pub fn sceneName(self: *const Portal) []const u8 {
+        return self.scene[0..self.scene_len];
+    }
+
+    pub fn spawnName(self: *const Portal) ?[]const u8 {
+        if (self.spawn_len == 0) return null;
+        return self.spawn[0..self.spawn_len];
+    }
+};
+
+pub const SpawnPoint = struct {
+    name: [events.MAX_ID_LEN]u8 = [_]u8{0} ** events.MAX_ID_LEN,
+    name_len: usize = 0,
+
+    pub fn init(name: []const u8) SpawnPoint {
+        var out = SpawnPoint{};
+        const len = @min(name.len, events.MAX_ID_LEN - 1);
+        @memcpy(out.name[0..len], name[0..len]);
+        out.name[len] = 0;
+        out.name_len = len;
+        return out;
+    }
+
+    pub fn get(self: *const SpawnPoint) []const u8 {
+        return self.name[0..self.name_len];
     }
 };
 
@@ -436,12 +558,16 @@ pub const World = struct {
     cameras: ComponentStorage(Camera) = .{},
     triggers: ComponentStorage(Trigger) = .{},
     box_colliders: ComponentStorage(BoxCollider) = .{},
+    interactables: ComponentStorage(Interactable) = .{},
+    portals: ComponentStorage(Portal) = .{},
+    spawn_points: ComponentStorage(SpawnPoint) = .{},
     actives: ComponentStorage(Active) = .{},
 
     bounds_width: f32 = 800,
     bounds_height: f32 = 450,
 
     max_entities: usize = 0,
+    next_entity_id: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator, max_entities: usize, game_state: *state.GameState) !Self {
         var self = Self{
@@ -472,6 +598,9 @@ pub const World = struct {
         try self.cameras.init(allocator, max_entities);
         try self.triggers.init(allocator, max_entities);
         try self.box_colliders.init(allocator, max_entities);
+        try self.interactables.init(allocator, max_entities);
+        try self.portals.init(allocator, max_entities);
+        try self.spawn_points.init(allocator, max_entities);
         try self.actives.init(allocator, max_entities);
 
         return self;
@@ -492,6 +621,9 @@ pub const World = struct {
         self.cameras.deinit(self.allocator);
         self.triggers.deinit(self.allocator);
         self.box_colliders.deinit(self.allocator);
+        self.interactables.deinit(self.allocator);
+        self.portals.deinit(self.allocator);
+        self.spawn_points.deinit(self.allocator);
         self.actives.deinit(self.allocator);
 
         self.entity_generations.deinit(self.allocator);
@@ -525,6 +657,9 @@ pub const World = struct {
         try self.cameras.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.triggers.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.box_colliders.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.interactables.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.portals.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.spawn_points.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.actives.ensureEntityCapacity(self.allocator, self.max_entities);
     }
 
@@ -538,10 +673,11 @@ pub const World = struct {
             // `pop()` returns an optional in Zig; unwrap is safe because len > 0.
             break :blk (self.free_list.pop() orelse unreachable);
         } else blk: {
-            const next_id: u32 = @intCast(self.entity_alive.items.len);
+            const next_id = self.next_entity_id;
             if (next_id >= self.max_entities) {
                 self.ensureCapacity(@as(usize, next_id) + 1) catch return Entity.INVALID;
             }
+            self.next_entity_id += 1;
             // After ensureCapacity, entity_alive has been resized to max_entities.
             break :blk next_id;
         };
@@ -577,6 +713,9 @@ pub const World = struct {
         self.cameras.remove(entity);
         self.triggers.remove(entity);
         self.box_colliders.remove(entity);
+        self.interactables.remove(entity);
+        self.portals.remove(entity);
+        self.spawn_points.remove(entity);
         self.actives.remove(entity);
 
         self.entity_alive.items[entity.id] = false;
@@ -649,50 +788,26 @@ pub const Systems = struct {
 
             const transform = world.transforms.get(entity) orelse continue;
             const speed = item.data.speed;
-            const previous = transform.position;
 
-            const right_down = rl.isKeyDown(.right);
-            const left_down = rl.isKeyDown(.left);
+            const input = inputVector(item.data.mode);
+            if (input.x != 0 or input.y != 0) {
+                item.data.facing = directionFromVector(input, item.data.facing);
+                if (item.data.facing == .right) transform.scale.x = -@abs(transform.scale.x);
+                if (item.data.facing == .left) transform.scale.x = @abs(transform.scale.x);
+            }
 
-            if (right_down) {
-                transform.position.x += speed * dt;
-                transform.scale.x = -1.0;
-            } else if (left_down) {
-                transform.position.x -= speed * dt;
-                transform.scale.x = 1.0;
+            if (item.data.mode == .grid4) {
+                updateGridMovement(world, entity, transform, item.data, input, dt);
             } else {
-                // Reset facing direction when not moving horizontally
-                transform.scale.x = 1.0;
-            }
+                const previous = transform.position;
+                transform.position.x += input.x * speed * dt;
+                clampEntityToWorld(world, entity);
+                if (collidesWithSolid(world, entity)) transform.position.x = previous.x;
 
-            if (rl.isKeyDown(.up)) {
-                transform.position.y -= speed * dt;
-            }
-            if (rl.isKeyDown(.down)) {
-                transform.position.y += speed * dt;
-            }
-
-            var sprite_w: f32 = 32;
-            var sprite_h: f32 = 32;
-            if (world.sprite_renderers.get(entity)) |sr| {
-                sprite_w = @floatFromInt(sr.texture.width);
-                sprite_h = @floatFromInt(sr.texture.height);
-            } else if (world.box_colliders.get(entity)) |col| {
-                sprite_w = col.width;
-                sprite_h = col.height;
-            }
-
-            if (transform.position.x < 0) transform.position.x = 0;
-            if (transform.position.y < 0) transform.position.y = 0;
-            if (transform.position.x + sprite_w > world.bounds_width) {
-                transform.position.x = world.bounds_width - sprite_w;
-            }
-            if (transform.position.y + sprite_h > world.bounds_height) {
-                transform.position.y = world.bounds_height - sprite_h;
-            }
-
-            if (collidesWithSolid(world, entity)) {
-                transform.position = previous;
+                const after_x = transform.position;
+                transform.position.y += input.y * speed * dt;
+                clampEntityToWorld(world, entity);
+                if (collidesWithSolid(world, entity)) transform.position.y = after_x.y;
             }
         }
     }
@@ -725,7 +840,25 @@ pub const Systems = struct {
                     target_y += col.height / 2;
                 }
 
-                cam.target = .{ .x = target_x, .y = target_y };
+                var desired = rl.Vector2{ .x = target_x, .y = target_y };
+                if (cam.clamp_to_scene) {
+                    const view_w = @as(f32, @floatFromInt(rl.getScreenWidth())) / @max(cam.zoom, 0.001);
+                    const view_h = @as(f32, @floatFromInt(rl.getScreenHeight())) / @max(cam.zoom, 0.001);
+                    if (world.bounds_width > view_w) {
+                        desired.x = std.math.clamp(desired.x, view_w / 2, world.bounds_width - view_w / 2);
+                    }
+                    if (world.bounds_height > view_h) {
+                        desired.y = std.math.clamp(desired.y, view_h / 2, world.bounds_height - view_h / 2);
+                    }
+                }
+
+                if (cam.smoothing <= 0) {
+                    cam.target = desired;
+                } else {
+                    const t = 1.0 - @exp(-cam.smoothing * rl.getFrameTime());
+                    cam.target.x += (desired.x - cam.target.x) * t;
+                    cam.target.y += (desired.y - cam.target.y) * t;
+                }
             }
 
             if (cam.shake_time > 0 and cam.shake_duration > 0) {
@@ -861,40 +994,73 @@ pub const Systems = struct {
             const inside = rl.checkCollisionRecs(player_rect, trigger.bounds);
 
             if (inside and !trigger.was_inside) {
-                // Just entered trigger
-                switch (trigger.action) {
-                    .show_message => |payload| {
-                        const len = std.mem.indexOfScalar(u8, &payload.text, 0) orelse payload.text.len;
-                        world.state.eventQueue.push(events.showMessage(payload.text[0..len], payload.duration)) catch {};
-                    },
-                    .start_dialogue => |payload| {
-                        if (payload.id_len > 0) {
-                            const label = if (payload.label_len > 0) payload.label[0..payload.label_len] else null;
-                            world.state.eventQueue.push(events.startDialogueById(payload.runner, payload.context, payload.id[0..payload.id_len], label)) catch {};
-                        } else if (payload.label_len > 0) {
-                            world.state.eventQueue.push(events.startDialogueAt(payload.runner, payload.context, payload.label[0..payload.label_len])) catch {};
-                        } else {
-                            world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
-                        }
-                    },
-                    .change_scene => |cs| {
-                        if (cs.use_index) {
-                            world.state.eventQueue.push(events.changeSceneByIndex(cs.index)) catch {};
-                        } else {
-                            world.state.eventQueue.push(events.changeSceneByName(cs.name[0..cs.name_len])) catch {};
-                        }
-                    },
-                    .set_flag => |sf| {
-                        world.state.eventQueue.push(events.setFlag(sf.name[0..sf.name_len], sf.value)) catch {};
-                    },
-                    .run_action => |action| {
-                        world.state.eventQueue.push(events.customEvent(action(world))) catch {};
-                    },
-                }
+                executeAction(world, trigger.action);
                 if (trigger.one_shot) trigger.triggered = true;
             }
 
             trigger.was_inside = inside;
+        }
+    }
+
+    pub fn portalCheck(world: *World) void {
+        const player_rect = getPlayerRect(world) orelse return;
+        var it = world.portals.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const portal = item.data;
+            if (!rl.checkCollisionRecs(player_rect, portal.bounds)) continue;
+            world.state.eventQueue.push(events.changeSceneByNameToSpawn(portal.sceneName(), portal.spawnName())) catch {};
+            return;
+        }
+    }
+
+    pub fn interactionCheck(world: *World) void {
+        const player = firstPlayer(world) orelse return;
+        const player_rect = entityRect(world, player) orelse return;
+        const controller = world.player_controllers.get(player) orelse return;
+        const probe = interactionProbe(player_rect, controller.facing);
+        var prompt: ?[]const u8 = null;
+        var target: ?Entity = null;
+
+        var it = world.interactables.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const interactable = item.data;
+            if (!interactable.repeatable and interactable.used) continue;
+            if (!rl.checkCollisionRecs(probe, interactable.bounds)) continue;
+            prompt = interactable.promptText();
+            target = entity;
+            break;
+        }
+
+        if (target) |entity| {
+            if (rl.isKeyPressed(.space) or rl.isKeyPressed(.enter) or rl.isKeyPressed(.e)) {
+                if (world.interactables.get(entity)) |interactable| {
+                    executeAction(world, interactable.action);
+                    if (!interactable.repeatable) interactable.used = true;
+                }
+            }
+        }
+    }
+
+    pub fn drawInteractionPrompt(world: *World) void {
+        const player = firstPlayer(world) orelse return;
+        const player_rect = entityRect(world, player) orelse return;
+        const controller = world.player_controllers.get(player) orelse return;
+        const probe = interactionProbe(player_rect, controller.facing);
+
+        var it = world.interactables.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (!world.isActive(entity)) continue;
+            const interactable = item.data;
+            if (!interactable.repeatable and interactable.used) continue;
+            if (!rl.checkCollisionRecs(probe, interactable.bounds)) continue;
+            const text = interactable.promptText();
+            if (text.len > 0) drawPromptHint(text);
+            return;
         }
     }
 
@@ -1008,6 +1174,10 @@ pub const Systems = struct {
         }
     }
 
+    pub fn drawWorldUi(world: *World) void {
+        _ = world;
+    }
+
     pub fn getActiveCamera(world: *World) !rl.Camera2D {
         var it = world.cameras.iterator();
         while (it.next()) |item| {
@@ -1117,6 +1287,139 @@ pub const Systems = struct {
             p.max_life = emitter.lifetime;
             return;
         }
+    }
+
+    pub fn executeAction(world: *World, action: TriggerAction) void {
+        switch (action) {
+            .show_message => |payload| {
+                const len = std.mem.indexOfScalar(u8, &payload.text, 0) orelse payload.text.len;
+                world.state.eventQueue.push(events.showMessage(payload.text[0..len], payload.duration)) catch {};
+            },
+            .start_dialogue => |payload| {
+                if (payload.id_len > 0) {
+                    const label = if (payload.label_len > 0) payload.label[0..payload.label_len] else null;
+                    world.state.eventQueue.push(events.startDialogueById(payload.runner, payload.context, payload.id[0..payload.id_len], label)) catch {};
+                } else if (payload.label_len > 0) {
+                    world.state.eventQueue.push(events.startDialogueAt(payload.runner, payload.context, payload.label[0..payload.label_len])) catch {};
+                } else {
+                    world.state.eventQueue.push(events.startDialogue(payload.runner, payload.context)) catch {};
+                }
+            },
+            .change_scene => |cs| {
+                if (cs.use_index) {
+                    world.state.eventQueue.push(events.changeSceneByIndex(cs.index)) catch {};
+                } else {
+                    world.state.eventQueue.push(events.changeSceneByName(cs.name[0..cs.name_len])) catch {};
+                }
+            },
+            .set_flag => |sf| {
+                world.state.eventQueue.push(events.setFlag(sf.name[0..sf.name_len], sf.value)) catch {};
+            },
+            .start_combat => |sc| {
+                _ = world.state.combatState.start(sc.encounter[0..sc.encounter_len]);
+            },
+            .sequence => |items| {
+                for (items) |item| executeAction(world, item);
+            },
+            .run_action => |action_fn| {
+                world.state.eventQueue.push(events.customEvent(action_fn(world))) catch {};
+            },
+        }
+    }
+
+    fn firstPlayer(world: *World) ?Entity {
+        var it = world.player_controllers.iterator();
+        while (it.next()) |item| {
+            const entity = world.entityFromId(item.entity_id);
+            if (world.isActive(entity)) return entity;
+        }
+        return null;
+    }
+
+    fn inputVector(mode: MovementMode) rl.Vector2 {
+        var out = rl.Vector2{ .x = 0, .y = 0 };
+        if (rl.isKeyDown(.right)) out.x += 1;
+        if (rl.isKeyDown(.left)) out.x -= 1;
+        if (rl.isKeyDown(.down)) out.y += 1;
+        if (rl.isKeyDown(.up)) out.y -= 1;
+        if (mode == .smooth4 or mode == .grid4) {
+            if (@abs(out.x) > 0 and @abs(out.y) > 0) out.y = 0;
+        } else if (out.x != 0 and out.y != 0) {
+            const inv = 0.70710677;
+            out.x *= inv;
+            out.y *= inv;
+        }
+        return out;
+    }
+
+    fn directionFromVector(v: rl.Vector2, fallback: Direction) Direction {
+        if (@abs(v.x) > @abs(v.y)) return if (v.x > 0) .right else .left;
+        if (v.y > 0) return .down;
+        if (v.y < 0) return .up;
+        return fallback;
+    }
+
+    fn updateGridMovement(world: *World, entity: Entity, transform: *Transform, pc: *PlayerController, input: rl.Vector2, dt: f32) void {
+        if (pc.stepping) {
+            pc.step_elapsed += dt;
+            const t = std.math.clamp(pc.step_elapsed / @max(pc.step_time, 0.001), 0, 1);
+            const eased = t * t * (3 - 2 * t);
+            transform.position.x = pc.step_from.x + (pc.step_to.x - pc.step_from.x) * eased;
+            transform.position.y = pc.step_from.y + (pc.step_to.y - pc.step_from.y) * eased;
+            if (t >= 1) {
+                pc.stepping = false;
+                transform.position = pc.step_to;
+            }
+            return;
+        }
+
+        if (input.x == 0 and input.y == 0) return;
+        pc.step_from = transform.position;
+        pc.step_to = .{ .x = transform.position.x + input.x * pc.step_size, .y = transform.position.y + input.y * pc.step_size };
+        transform.position = pc.step_to;
+        clampEntityToWorld(world, entity);
+        if (collidesWithSolid(world, entity)) {
+            transform.position = pc.step_from;
+            return;
+        }
+        pc.step_to = transform.position;
+        transform.position = pc.step_from;
+        pc.step_elapsed = 0;
+        pc.stepping = true;
+    }
+
+    fn clampEntityToWorld(world: *World, entity: Entity) void {
+        const tr = world.transforms.get(entity) orelse return;
+        const rect = entityRect(world, entity) orelse return;
+        if (rect.x < 0) tr.position.x += -rect.x;
+        if (rect.y < 0) tr.position.y += -rect.y;
+        if (rect.x + rect.width > world.bounds_width) tr.position.x -= rect.x + rect.width - world.bounds_width;
+        if (rect.y + rect.height > world.bounds_height) tr.position.y -= rect.y + rect.height - world.bounds_height;
+    }
+
+    fn interactionProbe(player_rect: rl.Rectangle, facing: Direction) rl.Rectangle {
+        const reach: f32 = 14;
+        const v = facing.vector();
+        var probe = player_rect;
+        probe.x += v.x * reach;
+        probe.y += v.y * reach;
+        if (v.x != 0) {
+            probe.width += reach;
+            if (v.x < 0) probe.x -= reach;
+        }
+        if (v.y != 0) {
+            probe.height += reach;
+            if (v.y < 0) probe.y -= reach;
+        }
+        return probe;
+    }
+
+    fn drawPromptHint(text: []const u8) void {
+        var buf: [96]u8 = undefined;
+        const line = std.fmt.bufPrintZ(&buf, "[E] {s}", .{text}) catch return;
+        const width = rl.measureText(line, 18);
+        rl.drawRectangle(16, rl.getScreenHeight() - 42, width + 18, 28, rl.Color{ .r = 8, .g = 10, .b = 12, .a = 210 });
+        rl.drawText(line, 25, rl.getScreenHeight() - 36, 18, rl.Color.white);
     }
 
     fn entityRect(world: *World, entity: Entity) ?rl.Rectangle {

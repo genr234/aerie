@@ -92,7 +92,13 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
             try scene.world.rect_renderers.set(scene.world.allocator, entity, .{ .width = r.width, .height = r.height, .color = r.color });
         },
         .PlayerController => |pc| {
-            try scene.world.player_controllers.set(scene.world.allocator, entity, .{ .speed = pc.speed, .paused = false });
+            try scene.world.player_controllers.set(scene.world.allocator, entity, .{
+                .speed = pc.speed,
+                .paused = false,
+                .mode = lowerMovementMode(pc.mode),
+                .step_size = pc.step_size,
+                .step_time = pc.step_time,
+            });
         },
         .Solid => |solid| {
             try scene.world.solids.set(scene.world.allocator, entity, .{ .enabled = solid.enabled });
@@ -144,11 +150,19 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
         },
         .Camera => |c| {
             // follow_target resolved in pass2.
-            try scene.world.cameras.set(scene.world.allocator, entity, .{ .offset = c.offset, .target = .{ .x = 0, .y = 0 }, .rotation = c.rotation, .zoom = c.zoom, .follow_target = ecs.Entity.INVALID });
+            try scene.world.cameras.set(scene.world.allocator, entity, .{
+                .offset = c.offset,
+                .target = .{ .x = 0, .y = 0 },
+                .rotation = c.rotation,
+                .zoom = c.zoom,
+                .follow_target = ecs.Entity.INVALID,
+                .smoothing = c.smoothing,
+                .clamp_to_scene = c.clamp_to_scene,
+            });
         },
         .Trigger => |t| {
             // TriggerCheck reads Trigger.bounds directly. We keep action event-driven.
-            const action = try lowerTriggerAction(t.action, dialogue);
+            const action = try lowerTriggerAction(scene.world.allocator, t.action, dialogue);
             try scene.world.triggers.set(scene.world.allocator, entity, .{
                 .bounds = t.bounds,
                 .action = action,
@@ -156,6 +170,19 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
                 .one_shot = t.one_shot,
                 .triggered = false,
             });
+        },
+        .BoxCollider => |bc| {
+            try scene.world.box_colliders.set(scene.world.allocator, entity, .{ .width = bc.width, .height = bc.height, .offset = bc.offset });
+        },
+        .Interactable => |interactable| {
+            const action = try lowerTriggerAction(scene.world.allocator, interactable.action, dialogue);
+            try scene.world.interactables.set(scene.world.allocator, entity, ecs.Interactable.init(interactable.bounds, action, interactable.prompt, interactable.repeatable));
+        },
+        .Portal => |portal| {
+            try scene.world.portals.set(scene.world.allocator, entity, ecs.Portal.init(portal.bounds, portal.scene, portal.spawn));
+        },
+        .SpawnPoint => |spawn| {
+            try scene.world.spawn_points.set(scene.world.allocator, entity, ecs.SpawnPoint.init(spawn.name));
         },
     }
 
@@ -179,11 +206,24 @@ fn applyComponentPass2(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
                 }
             }
         },
+        .PlayerController => {
+            if (!scene.world.box_colliders.has(entity)) {
+                if (scene.world.sprite_renderers.get(entity)) |sr| {
+                    const sprite_w = if (sr.frame_width > 0) sr.frame_width else @as(f32, @floatFromInt(sr.texture.width));
+                    const sprite_h = if (sr.frame_height > 0) sr.frame_height else @as(f32, @floatFromInt(sr.texture.height));
+                    try scene.world.box_colliders.set(scene.world.allocator, entity, .{
+                        .width = sprite_w * 0.55,
+                        .height = sprite_h * 0.35,
+                        .offset = .{ .x = sprite_w * 0.225, .y = sprite_h * 0.62 },
+                    });
+                }
+            }
+        },
         else => {},
     }
 }
 
-fn lowerTriggerAction(action: types.TriggerActionIR, dialogue: DialogueBindings) !ecs.TriggerAction {
+fn lowerTriggerAction(allocator: std.mem.Allocator, action: types.TriggerActionIR, dialogue: DialogueBindings) !ecs.TriggerAction {
     return switch (action) {
         .ShowMessage => |sm| ecs.TriggerShowMessage(sm.text, sm.duration),
         .StartDialogue => |sd| blk: {
@@ -210,5 +250,21 @@ fn lowerTriggerAction(action: types.TriggerActionIR, dialogue: DialogueBindings)
             out.set_flag.name_len = len;
             break :blk out;
         },
+        .StartCombat => |sc| ecs.TriggerStartCombat(sc.encounter),
+        .Sequence => |items| blk: {
+            const out = try allocator.alloc(ecs.TriggerAction, items.len);
+            for (items, 0..) |item, i| {
+                out[i] = try lowerTriggerAction(allocator, item, dialogue);
+            }
+            break :blk .{ .sequence = out };
+        },
+    };
+}
+
+fn lowerMovementMode(mode: types.MovementModeIR) ecs.MovementMode {
+    return switch (mode) {
+        .smooth4 => .smooth4,
+        .smooth8 => .smooth8,
+        .grid4 => .grid4,
     };
 }

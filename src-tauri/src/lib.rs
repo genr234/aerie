@@ -4,8 +4,9 @@ use std::{
     io::{BufRead, BufReader},
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     thread,
+    time::Duration,
 };
 use tauri::{Emitter, Manager, State};
 use tempfile::TempDir;
@@ -16,7 +17,7 @@ struct PreviewState {
 }
 
 struct PreviewProcess {
-    child: Child,
+    child: Arc<Mutex<Child>>,
     _project_dir: TempDir,
 }
 
@@ -122,6 +123,13 @@ fn start_preview(
     write_files_to_dir(project_dir.path(), files)?;
 
     let engine_path = resolve_engine_path(&app)?;
+    let _ = app.emit(
+        "preview-log",
+        serde_json::json!({
+            "stream": "stdout",
+            "line": format!("[preview] launching {}", engine_path.display()),
+        }),
+    );
     let mut child = Command::new(&engine_path)
         .arg(project_dir.path())
         .stdout(Stdio::piped())
@@ -135,6 +143,9 @@ fn start_preview(
     if let Some(stderr) = child.stderr.take() {
         stream_preview_output(app.clone(), "stderr", stderr);
     }
+
+    let child = Arc::new(Mutex::new(child));
+    monitor_preview_process(app.clone(), child.clone());
 
     *state.process.lock().map_err(lock_error)? = Some(PreviewProcess {
         child,
@@ -150,9 +161,11 @@ fn stop_preview(state: State<'_, PreviewState>) -> Result<String, String> {
 }
 
 fn stop_preview_state(state: &PreviewState) -> Result<String, String> {
-    if let Some(mut preview) = state.process.lock().map_err(lock_error)?.take() {
-        let _ = preview.child.kill();
-        let _ = preview.child.wait();
+    if let Some(preview) = state.process.lock().map_err(lock_error)?.take() {
+        if let Ok(mut child) = preview.child.lock() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
     Ok("Preview stopped.".to_string())
 }
@@ -251,6 +264,47 @@ where
     });
 }
 
+fn monitor_preview_process(app: tauri::AppHandle, child: Arc<Mutex<Child>>) {
+    thread::spawn(move || {
+        let status = loop {
+            let status = match child.lock() {
+                Ok(mut child) => child.try_wait(),
+                Err(_) => {
+                    let _ = app.emit(
+                        "preview-log",
+                        serde_json::json!({
+                            "stream": "stderr",
+                            "line": "[preview] process monitor lock failed",
+                        }),
+                    );
+                    return;
+                }
+            };
+            match status {
+                Ok(Some(status)) => break Ok(status),
+                Ok(None) => thread::sleep(Duration::from_millis(250)),
+                Err(error) => break Err(error),
+            }
+        };
+
+        let line = match status {
+            Ok(status) => match status.code() {
+                Some(code) => format!("[preview] exited with code {code}"),
+                None => "[preview] exited without a status code".to_string(),
+            },
+            Err(error) => format!("[preview] wait failed: {error}"),
+        };
+
+        let _ = app.emit(
+            "preview-log",
+            serde_json::json!({
+                "stream": "stdout",
+                "line": line,
+            }),
+        );
+    });
+}
+
 fn safe_relative_path(path: &str) -> Result<PathBuf, String> {
     let normalized = path.replace('\\', "/");
     let candidate = Path::new(&normalized);
@@ -274,20 +328,18 @@ fn safe_relative_path(path: &str) -> Result<PathBuf, String> {
 }
 
 fn resolve_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let repo_engine = repo_engine_path()?;
+
+    if cfg!(debug_assertions) && repo_engine.exists() {
+        return Ok(repo_engine);
+    }
+
     if let Ok(resource_dir) = app.path().resource_dir() {
         let bundled = resource_dir.join(engine_binary_name());
         if bundled.exists() {
             return Ok(bundled);
         }
     }
-
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_engine = manifest_dir
-        .parent()
-        .ok_or_else(|| "failed to resolve repository root".to_string())?
-        .join("zig-out")
-        .join("bin")
-        .join(engine_binary_name());
 
     if repo_engine.exists() {
         return Ok(repo_engine);
@@ -297,6 +349,16 @@ fn resolve_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
         "game_engine binary not found. Run `just build` first; expected {}",
         repo_engine.display()
     ))
+}
+
+fn repo_engine_path() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    Ok(manifest_dir
+        .parent()
+        .ok_or_else(|| "failed to resolve repository root".to_string())?
+        .join("zig-out")
+        .join("bin")
+        .join(engine_binary_name()))
 }
 
 fn engine_binary_name() -> &'static str {

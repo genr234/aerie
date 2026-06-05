@@ -43,11 +43,18 @@ pub const ChangeScene = struct {
     sceneIndex: usize = 0,
     sceneName: [MAX_ID_LEN]u8 = undefined,
     nameLen: usize = 0,
+    spawnName: [MAX_ID_LEN]u8 = undefined,
+    spawnLen: usize = 0,
     useIndex: bool = true,
 
     pub fn getSceneName(self: *const ChangeScene) ?[]const u8 {
         if (self.nameLen == 0) return null;
         return self.sceneName[0..self.nameLen];
+    }
+
+    pub fn getSpawnName(self: *const ChangeScene) ?[]const u8 {
+        if (self.spawnLen == 0) return null;
+        return self.spawnName[0..self.spawnLen];
     }
 };
 
@@ -141,9 +148,23 @@ pub fn changeSceneByIndex(index: usize) Event {
 
 pub fn changeSceneByName(name: []const u8) Event {
     const len = @min(name.len, MAX_ID_LEN - 1);
-    var ev: ChangeScene = .{ .useIndex = false, .nameLen = len };
+    var ev: ChangeScene = .{ .useIndex = false, .nameLen = len, .spawnLen = 0 };
     @memcpy(ev.sceneName[0..len], name[0..len]);
     ev.sceneName[len] = 0;
+    return .{ .ChangeScene = ev };
+}
+
+pub fn changeSceneByNameToSpawn(name: []const u8, spawn: ?[]const u8) Event {
+    const len = @min(name.len, MAX_ID_LEN - 1);
+    var ev: ChangeScene = .{ .useIndex = false, .nameLen = len, .spawnLen = 0 };
+    @memcpy(ev.sceneName[0..len], name[0..len]);
+    ev.sceneName[len] = 0;
+    if (spawn) |spawn_name| {
+        const spawn_len = @min(spawn_name.len, MAX_ID_LEN - 1);
+        @memcpy(ev.spawnName[0..spawn_len], spawn_name[0..spawn_len]);
+        ev.spawnName[spawn_len] = 0;
+        ev.spawnLen = spawn_len;
+    }
     return .{ .ChangeScene = ev };
 }
 
@@ -311,6 +332,7 @@ pub const EventQueue = struct {
 
             .ChangeScene => |cs| {
                 if (self.systems.sceneManager) |mgr| {
+                    mgr.setPendingSpawn(cs.getSpawnName());
                     if (cs.useIndex) {
                         mgr.changeScene(cs.sceneIndex) catch {};
                     } else if (cs.getSceneName()) |name| {

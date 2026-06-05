@@ -227,8 +227,11 @@ pub const Scene = struct {
         ecs.Systems.spriteAnimation(&self.world, dt);
         ecs.Systems.particlesUpdate(&self.world, dt);
         ecs.Systems.cameraFollow(&self.world);
-        ecs.Systems.triggerCheck(&self.world);
-        ecs.Systems.processEvents(&self.world, dt);
+        if (!paused) {
+            ecs.Systems.triggerCheck(&self.world);
+            ecs.Systems.portalCheck(&self.world);
+            ecs.Systems.interactionCheck(&self.world);
+        }
     }
 
     pub fn drawWorld(self: *Self) void {
@@ -439,6 +442,8 @@ pub const SceneManager = struct {
     inputBlocked: bool = false,
     zoomTarget: f32 = 1.0,
     zoomStart: f32 = 1.0,
+    pendingSpawnName: [64]u8 = [_]u8{0} ** 64,
+    pendingSpawnLen: usize = 0,
 
     // Track objects to cleanup from old scene after transition
     objectsToCleanup: [64][]const u8 = undefined,
@@ -486,6 +491,16 @@ pub const SceneManager = struct {
 
     pub fn setOnTransition(self: *SceneManager, func: ?*const fn (*Scene, *SceneManager, usize) bool) void {
         self.onTransition = func;
+    }
+
+    pub fn setPendingSpawn(self: *SceneManager, spawn: ?[]const u8) void {
+        self.pendingSpawnLen = 0;
+        if (spawn) |name| {
+            const len = @min(name.len, self.pendingSpawnName.len - 1);
+            @memcpy(self.pendingSpawnName[0..len], name[0..len]);
+            self.pendingSpawnName[len] = 0;
+            self.pendingSpawnLen = len;
+        }
     }
 
     fn startTransition(self: *SceneManager, index: usize) void {
@@ -610,6 +625,26 @@ pub const SceneManager = struct {
         }
     }
 
+    fn applyPendingSpawn(self: *SceneManager) void {
+        if (self.pendingSpawnLen == 0) return;
+        const spawn_name = self.pendingSpawnName[0..self.pendingSpawnLen];
+        const scene = self.currentScene();
+        const player = scene.world.findByTag("player") orelse return;
+        const player_tr = scene.world.transforms.get(player) orelse return;
+
+        var it = scene.world.spawn_points.iterator();
+        while (it.next()) |item| {
+            const entity = scene.world.entityFromId(item.entity_id);
+            if (!scene.world.isActive(entity)) continue;
+            if (!std.mem.eql(u8, item.data.get(), spawn_name)) continue;
+            if (scene.world.transforms.get(entity)) |spawn_tr| {
+                player_tr.position = spawn_tr.position;
+                self.pendingSpawnLen = 0;
+                return;
+            }
+        }
+    }
+
     pub fn cleanupTransferredObjects(self: *SceneManager, fromIdx: usize) void {
         if (fromIdx >= self.scenes.len) return;
         const src_world = &self.scenes[fromIdx].world;
@@ -651,6 +686,7 @@ pub const SceneManager = struct {
                     self.currentIndex = next;
                     self.scenes[self.currentIndex].dispatchOnEnter();
                     self.cleanupTransferredObjects(old);
+                    self.applyPendingSpawn();
                 }
                 self.transitionState = .FadingIn;
                 self.transitionTimer = 0.0;
@@ -678,6 +714,10 @@ pub const SceneManager = struct {
         const cs = self.currentScene();
         cs.dispatchDraw();
 
+        self.drawTransitionOverlay();
+    }
+
+    pub fn drawTransitionOverlay(self: *SceneManager) void {
         if (self.transitionState != .None) {
             const dur = self.transitionDuration;
             var alpha_f: f32 = 0.0;

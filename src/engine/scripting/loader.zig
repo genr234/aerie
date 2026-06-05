@@ -230,6 +230,11 @@ pub const Loader = struct {
         \\  foreign static combatDamage(actor, amount)
         \\  foreign static combatHeal(actor, amount)
         \\  foreign static combatHp(actor)
+        \\  foreign static combatStart(encounter)
+        \\  foreign static combatIsActive()
+        \\  foreign static combatState()
+        \\  foreign static combatActorHp(actor)
+        \\  foreign static combatActorMp(actor)
         \\  foreign static onKeyPressed(key, callback)
         \\  foreign static onKeyReleased(key, callback)
         \\  foreign static onAnyKey(callback)
@@ -258,59 +263,89 @@ pub const Loader = struct {
         \\
         \\class State {
         \\  static set(name, value) {
-        \\    if (value is Bool) return Engine.setFlag(name, value)
-        \\    if (value is Num) return Engine.setFloat(name, value)
-        \\    if (value is String) return Engine.setString(name, value)
+        \\    if (value is Bool) { Engine.setFlag(name, value) }
+        \\    if (value is Num) { Engine.setFloat(name, value) }
+        \\    if (value is String) { Engine.setString(name, value) }
         \\  }
         \\
         \\  static get(name) {
-        \\    if (Engine.hasFlag(name)) return Engine.getFlag(name)
+        \\    if (Engine.hasFlag(name)) {
+        \\      return Engine.getFlag(name)
+        \\    }
         \\    var text = Engine.getString(name)
-        \\    if (text != "") return text
+        \\    if (text != "") {
+        \\      return text
+        \\    }
         \\    return Engine.getFloat(name)
         \\  }
         \\
         \\  static update(name, callback) { State.set(name, callback.call(State.get(name))) }
         \\
         \\  static setFlag(name, value) { Engine.setFlag(name, value) }
-        \\  static getFlag(name) { Engine.getFlag(name) }
+        \\  static getFlag(name) {
+        \\    return Engine.getFlag(name)
+        \\  }
         \\  static toggleFlag(name) { Engine.toggleFlag(name) }
-        \\  static hasFlag(name) { Engine.hasFlag(name) }
+        \\  static hasFlag(name) {
+        \\    return Engine.hasFlag(name)
+        \\  }
         \\
         \\  static setInt(name, value) { Engine.setInt(name, value) }
-        \\  static getInt(name) { Engine.getInt(name) }
+        \\  static getInt(name) {
+        \\    return Engine.getInt(name)
+        \\  }
         \\  static addInt(name, delta) { Engine.addInt(name, delta) }
         \\
         \\  static setFloat(name, value) { Engine.setFloat(name, value) }
-        \\  static getFloat(name) { Engine.getFloat(name) }
+        \\  static getFloat(name) {
+        \\    return Engine.getFloat(name)
+        \\  }
         \\
         \\  static setString(name, value) { Engine.setString(name, value) }
-        \\  static getString(name) { Engine.getString(name) }
+        \\  static getString(name) {
+        \\    return Engine.getString(name)
+        \\  }
         \\
         \\  static setRelationship(name, value) { Engine.setRelationship(name, value) }
-        \\  static getRelationship(name) { Engine.getRelationship(name) }
+        \\  static getRelationship(name) {
+        \\    return Engine.getRelationship(name)
+        \\  }
         \\  static modifyRelationship(name, delta) { Engine.modifyRelationship(name, delta) }
         \\
         \\  static setChapter(chapter) { Engine.setChapter(chapter) }
-        \\  static getChapter() { Engine.getChapter() }
+        \\  static getChapter() {
+        \\    return Engine.getChapter()
+        \\  }
         \\  static setRoute(route) { Engine.setRoute(route) }
-        \\  static getRoute() { Engine.getRoute() }
-        \\  static getPlayTimeMinutes() { Engine.getPlayTimeMinutes() }
+        \\  static getRoute() {
+        \\    return Engine.getRoute()
+        \\  }
+        \\  static getPlayTimeMinutes() {
+        \\    return Engine.getPlayTimeMinutes()
+        \\  }
         \\}
         \\
         \\class Save {
         \\  static write(slot) { Engine.saveWrite(slot) }
         \\  static load(slot) { Engine.saveLoad(slot) }
-        \\  static exists(slot) { Engine.saveExists(slot) }
+        \\  static exists(slot) {
+        \\    return Engine.saveExists(slot)
+        \\  }
         \\  static clear(slot) { Engine.saveClear(slot) }
         \\}
         \\
         \\class Scene {
         \\  static change(index) { Engine.change(index) }
         \\  static go(name) { Engine.changeByName(name) }
-        \\  static currentIndex() { Engine.currentIndex() }
-        \\  static findIndex(name) { Engine.findIndex(name) }
-        \\  static count() { Engine.sceneCount() }
+        \\  static currentIndex() {
+        \\    return Engine.currentIndex()
+        \\  }
+        \\  static findIndex(name) {
+        \\    return Engine.findIndex(name)
+        \\  }
+        \\  static count() {
+        \\    return Engine.sceneCount()
+        \\  }
         \\}
         \\
         \\class Dialogue {
@@ -318,21 +353,29 @@ pub const Loader = struct {
         \\  static start(id) { Engine.start(id) }
         \\  static startAt(label) { Engine.startAt(label) }
         \\  static stop() { Engine.stopDialogue() }
-        \\  static isActive() { Engine.dialogueIsActive() }
+        \\  static isActive() {
+        \\    return Engine.dialogueIsActive()
+        \\  }
         \\  static skip() { Engine.dialogueSkip() }
         \\  static advance() { Engine.dialogueAdvance() }
         \\}
         \\
         \\class Entity {
-        \\  static exists(tag) { Engine.entityExists(tag) }
+        \\  static exists(tag) {
+        \\    return Engine.entityExists(tag)
+        \\  }
         \\  static setActive(tag, active) { Engine.entitySetActive(tag, active) }
-        \\  static getPosition(tag) { Engine.entityGetPosition(tag) }
+        \\  static getPosition(tag) {
+        \\    return Engine.entityGetPosition(tag)
+        \\  }
         \\  static setPosition(tag, x, y) { Engine.entitySetPosition(tag, x, y) }
         \\  static move(tag, dx, dy) { Engine.entityMove(tag, dx, dy) }
         \\  static despawn(tag) { Engine.entityDespawn(tag) }
         \\  static spawnRect(tag, x, y, w, h, color) { Engine.entitySpawnRect(tag, x, y, w, h, color) }
         \\  static spawnCircle(tag, x, y, radius, color) { Engine.entitySpawnCircle(tag, x, y, radius, color) }
-        \\  static setAnimation(tag, name) { Engine.entitySetAnimation(tag, name) }
+        \\  static setAnimation(tag, name) {
+        \\    return Engine.entitySetAnimation(tag, name)
+        \\  }
         \\  static tweenTo(tag, x, y, duration) { Engine.entityTweenTo(tag, x, y, duration) }
         \\  static emitParticles(tag, count) { Engine.entityEmitParticles(tag, count) }
         \\}
@@ -343,22 +386,45 @@ pub const Loader = struct {
         \\
         \\class Inventory {
         \\  static add(item, amount) { Engine.inventoryAdd(item, amount) }
-        \\  static count(item) { Engine.inventoryCount(item) }
-        \\  static has(item, amount) { Engine.inventoryHas(item, amount) }
+        \\  static count(item) {
+        \\    return Engine.inventoryCount(item)
+        \\  }
+        \\  static has(item, amount) {
+        \\    return Engine.inventoryHas(item, amount)
+        \\  }
         \\}
         \\
         \\class Quest {
         \\  static start(id) { Engine.questStart(id) }
         \\  static complete(id) { Engine.questComplete(id) }
-        \\  static isActive(id) { Engine.questIsActive(id) }
-        \\  static isComplete(id) { Engine.questIsComplete(id) }
+        \\  static isActive(id) {
+        \\    return Engine.questIsActive(id)
+        \\  }
+        \\  static isComplete(id) {
+        \\    return Engine.questIsComplete(id)
+        \\  }
         \\}
         \\
         \\class Combat {
+        \\  static start(encounter) { Engine.combatStart(encounter) }
+        \\  static isActive() {
+        \\    return Engine.combatIsActive()
+        \\  }
+        \\  static state() {
+        \\    return Engine.combatState()
+        \\  }
+        \\  static actorHp(actor) {
+        \\    return Engine.combatActorHp(actor)
+        \\  }
+        \\  static actorMp(actor) {
+        \\    return Engine.combatActorMp(actor)
+        \\  }
         \\  static setHp(actor, hp) { Engine.combatSetHp(actor, hp) }
         \\  static damage(actor, amount) { Engine.combatDamage(actor, amount) }
         \\  static heal(actor, amount) { Engine.combatHeal(actor, amount) }
-        \\  static hp(actor) { Engine.combatHp(actor) }
+        \\  static hp(actor) {
+        \\    return Engine.combatHp(actor)
+        \\  }
         \\}
         \\
         \\class Input {

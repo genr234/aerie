@@ -8,6 +8,7 @@ pub const ecs = @import("engine/ecs.zig");
 pub const dialogue = @import("engine/dialogue.zig");
 pub const events = @import("engine/events.zig");
 pub const story = @import("engine/story.zig");
+pub const combat = @import("engine/combat.zig");
 pub const vn = @import("engine/vn.zig");
 pub const audio = @import("engine/audio.zig");
 pub const project = @import("engine/project.zig");

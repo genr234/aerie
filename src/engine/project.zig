@@ -24,6 +24,7 @@ pub const ProjectConfig = struct {
     scenes: []SceneDecl = &.{},
     scripts: []ScriptDecl = &.{},
     dialogues: []DialogueDecl = &.{},
+    combat: ?CombatDecl = null,
 
     window_width: i32 = 800,
     window_height: i32 = 450,
@@ -45,6 +46,10 @@ pub const DialogueDecl = struct {
     path: []const u8,
 };
 
+pub const CombatDecl = struct {
+    path: []const u8,
+};
+
 pub const SceneSource = struct {
     name: []const u8,
     json: []const u8,
@@ -60,11 +65,17 @@ pub const DialogueAsset = struct {
     source: []const u8,
 };
 
+pub const CombatAsset = struct {
+    path: []const u8,
+    source: []const u8,
+};
+
 pub const ProjectBundle = struct {
     config: ProjectConfig,
     scenes: []SceneSource,
     scripts: []const ScriptModule,
     dialogues: []const DialogueAsset = &.{},
+    combat: ?CombatAsset = null,
     resources: ?resources.ResourceProvider = null,
     asset_root: []const u8 = ".",
 
@@ -97,6 +108,10 @@ pub const ProjectBundle = struct {
             if (std.mem.eql(u8, asset.name, name)) return asset;
         }
         return null;
+    }
+
+    pub fn combatSource(self: *const ProjectBundle) ?[]const u8 {
+        return if (self.combat) |asset| asset.source else null;
     }
 };
 
@@ -155,12 +170,14 @@ fn loadProjectBundleFromProviderOnly(
     else
         &.{};
     const dialogues = try loadDeclaredDialogues(allocator, provider, cfg.dialogues);
+    const combat = try loadDeclaredCombat(allocator, provider, cfg.combat);
 
     return .{
         .config = cfg,
         .scenes = scenes,
         .scripts = scripts,
         .dialogues = dialogues,
+        .combat = combat,
         .resources = provider,
         .asset_root = try dupString(allocator, asset_root),
     };
@@ -193,12 +210,14 @@ fn loadProjectBundleFromProviderWithFallbackScripts(
     else
         &.{};
     const dialogues = try loadDeclaredDialogues(allocator, provider, cfg.dialogues);
+    const combat = try loadDeclaredCombat(allocator, provider, cfg.combat);
 
     return .{
         .config = cfg,
         .scenes = scenes,
         .scripts = scripts,
         .dialogues = dialogues,
+        .combat = combat,
         .resources = provider,
         .asset_root = try dupString(allocator, asset_root),
     };
@@ -288,6 +307,7 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
     }
     if (obj.get("scripts")) |s| cfg.scripts = try parseScriptDecls(allocator, s);
     if (obj.get("dialogues")) |d| cfg.dialogues = try parseDialogueDecls(allocator, d);
+    if (obj.get("combat")) |c| cfg.combat = try parseCombatDecl(allocator, c);
 
     if (obj.get("window")) |w| {
         if (w != .object) return ProjectError.InvalidType;
@@ -297,6 +317,14 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
     }
 
     return cfg;
+}
+
+fn loadDeclaredCombat(allocator: std.mem.Allocator, provider: resources.ResourceProvider, decl: ?CombatDecl) !?CombatAsset {
+    const c = decl orelse return null;
+    return .{
+        .path = try dupString(allocator, c.path),
+        .source = try provider.readText(allocator, c.path),
+    };
 }
 
 fn loadDeclaredScenes(allocator: std.mem.Allocator, provider: resources.ResourceProvider, decls: []const SceneDecl) ![]SceneSource {
@@ -403,6 +431,11 @@ fn parseDialogueDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]Dialog
     }
 
     return out;
+}
+
+fn parseCombatDecl(allocator: std.mem.Allocator, v: std.json.Value) !CombatDecl {
+    if (v != .object) return ProjectError.InvalidType;
+    return .{ .path = try dupString(allocator, try getString(v.object, "path")) };
 }
 
 fn sceneDeclsContainStart(decls: []const SceneDecl, start_scene: []const u8) bool {

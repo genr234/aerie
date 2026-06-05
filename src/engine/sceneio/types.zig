@@ -33,6 +33,10 @@ pub const ComponentIR = union(enum) {
     ParticleEmitter: ParticleEmitterIR,
     Tween: TweenIR,
     Trigger: TriggerIR,
+    BoxCollider: BoxColliderIR,
+    Interactable: InteractableIR,
+    Portal: PortalIR,
+    SpawnPoint: SpawnPointIR,
 };
 
 pub const TransformIR = struct {
@@ -67,11 +71,22 @@ pub const CameraIR = struct {
     offset: rl.Vector2,
     rotation: f32 = 0,
     zoom: f32 = 1.0,
+    smoothing: f32 = 10,
+    clamp_to_scene: bool = true,
     follow_tag: ?[]const u8 = null,
 };
 
 pub const PlayerControllerIR = struct {
     speed: f32 = 100,
+    mode: MovementModeIR = .smooth4,
+    step_size: f32 = 16,
+    step_time: f32 = 0.12,
+};
+
+pub const MovementModeIR = enum {
+    smooth4,
+    smooth8,
+    grid4,
 };
 
 pub const SolidIR = struct {
@@ -123,11 +138,36 @@ pub const TriggerIR = struct {
     action: TriggerActionIR,
 };
 
+pub const BoxColliderIR = struct {
+    width: f32,
+    height: f32,
+    offset: rl.Vector2 = .{ .x = 0, .y = 0 },
+};
+
+pub const InteractableIR = struct {
+    bounds: rl.Rectangle,
+    prompt: []const u8 = "Interact",
+    repeatable: bool = true,
+    action: TriggerActionIR,
+};
+
+pub const PortalIR = struct {
+    bounds: rl.Rectangle,
+    scene: []const u8,
+    spawn: ?[]const u8 = null,
+};
+
+pub const SpawnPointIR = struct {
+    name: []const u8,
+};
+
 pub const TriggerActionIR = union(enum) {
     StartDialogue: struct { id: ?[]const u8 = null, label: ?[]const u8 = null },
     ShowMessage: struct { text: []const u8, duration: f32 = 2.0 },
     ChangeScene: struct { index: ?usize = null, name: ?[]const u8 = null },
     SetFlag: struct { name: []const u8, value: bool = true },
+    StartCombat: struct { encounter: []const u8 },
+    Sequence: []const TriggerActionIR,
 };
 
 pub fn parseColor(name: []const u8) ?rl.Color {

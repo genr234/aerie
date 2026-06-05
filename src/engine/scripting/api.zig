@@ -91,6 +91,13 @@ pub const Api = struct {
         .{ "combatDamage(_,_)", &combat_damage },
         .{ "combatHeal(_,_)", &combat_heal },
         .{ "combatHp(_)", &combat_hp },
+        .{ "combatStart(_)", &combat_start },
+        .{ "combatIsActive", &combat_isActive },
+        .{ "combatIsActive()", &combat_isActive },
+        .{ "combatState", &combat_state },
+        .{ "combatState()", &combat_state },
+        .{ "combatActorHp(_)", &combat_hp },
+        .{ "combatActorMp(_)", &combat_mp },
         .{ "onKeyPressed(_,_)", &input_onKeyPressed },
         .{ "onKeyReleased(_,_)", &input_onKeyReleased },
         .{ "onAnyKey(_)", &input_onAnyKey },
@@ -924,9 +931,7 @@ pub const Api = struct {
         var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
         const actor = getSlotString(vm, 1, &actor_buf);
         const hp = @as(i32, @intFromFloat(wren_c.c.wrenGetSlotDouble(vm, 2)));
-        var key_buf: [64]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch return;
-        getCtx(vm).storyState.setInt(key, hp);
+        getCtx(vm).combatState.setHp(actor, hp);
     }
 
     fn combat_damage(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -943,12 +948,47 @@ pub const Api = struct {
         const vm = vm_opt.?;
         var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
         const actor = getSlotString(vm, 1, &actor_buf);
-        var key_buf: [64]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch {
-            wren_c.c.wrenSetSlotDouble(vm, 0, 0);
-            return;
+        wren_c.c.wrenSetSlotDouble(vm, 0, @floatFromInt(getCtx(vm).combatState.hp(actor)));
+    }
+
+    fn combat_mp(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const actor = getSlotString(vm, 1, &actor_buf);
+        const state = getCtx(vm).combatState;
+        for (state.battlers[0..state.battler_count]) |b| {
+            if (std.mem.eql(u8, b.actor.id, actor)) {
+                wren_c.c.wrenSetSlotDouble(vm, 0, @floatFromInt(b.mp));
+                return;
+            }
+        }
+        wren_c.c.wrenSetSlotDouble(vm, 0, 0);
+    }
+
+    fn combat_start(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var id_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const id = getSlotString(vm, 1, &id_buf);
+        wren_c.c.wrenSetSlotBool(vm, 0, getCtx(vm).combatState.start(id));
+    }
+
+    fn combat_isActive(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        wren_c.c.wrenSetSlotBool(vm, 0, getCtx(vm).combatState.active);
+    }
+
+    fn combat_state(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const state = getCtx(vm).combatState.phase;
+        const text = switch (state) {
+            .idle => "idle",
+            .player_turn => "player_turn",
+            .enemy_turn => "enemy_turn",
+            .resolving => "resolving",
+            .won => "won",
+            .lost => "lost",
         };
-        wren_c.c.wrenSetSlotDouble(vm, 0, @floatFromInt(getCtx(vm).storyState.getInt(key)));
+        wren_c.c.wrenSetSlotBytes(vm, 0, text.ptr, text.len);
     }
 
     fn setQuestState(vm: *wren_c.c.WrenVM, value: []const u8) void {
@@ -970,9 +1010,7 @@ pub const Api = struct {
     fn modifyCombatHp(vm: *wren_c.c.WrenVM, delta: i32) void {
         var actor_buf: [events.MAX_ID_LEN]u8 = undefined;
         const actor = getSlotString(vm, 1, &actor_buf);
-        var key_buf: [64]u8 = undefined;
-        const key = std.fmt.bufPrint(&key_buf, "combat.{s}.hp", .{actor}) catch return;
-        getCtx(vm).storyState.addInt(key, delta);
+        getCtx(vm).combatState.modifyHp(actor, delta);
     }
 
     fn parseApiColor(value: []const u8) rl.Color {
