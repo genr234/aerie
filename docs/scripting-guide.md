@@ -3,7 +3,7 @@
 Scripts are Wren modules declared in `game.json`. The default entry is `assets/scripts/main.wren` with class `Game`.
 
 ```wren
-import "engine/api" for Events, State, Scene, UI, Save, Entity, CameraFx
+import "engine/api" for Events, State, Scene, UI, Save, Entity, CameraFx, Combat
 
 class Game {
   static onBoot() {
@@ -29,7 +29,8 @@ Core APIs:
 - `CameraFx.shake(intensity, duration)` shakes the active camera.
 - `UI.text`, `UI.button`, `UI.panel`, and `UI.bar` draw simple UI.
 - `Save.write(slot)`, `Save.load(slot)`, `Save.exists(slot)`, and `Save.clear(slot)` persist v1 JSON saves under `saves/`.
-- `Inventory.add/count/has`, `Quest.start/complete/isActive/isComplete`, and `Combat.setHp/damage/heal/hp` provide tiny save-backed gameplay modules.
+- `Combat.start(encounter)`, `Combat.isActive()`, `Combat.state()`, `Combat.actorHp(actor)`, and `Combat.actorMp(actor)` run turn-based battles from the declared combat asset.
+- `Inventory.add/count/has`, `Quest.start/complete/isActive/isComplete`, and `Combat.setHp/damage/heal/hp` provide save-backed gameplay helpers.
 
 Example:
 
@@ -40,13 +41,13 @@ class Game {
   static onBoot() {
     Inventory.add("key", 1)
     Quest.start("open_gate")
-    Combat.setHp("slime", 12)
+    Combat.start("slime_duo")
   }
 
   static onUpdate(dt) {
     Entity.setAnimation("player", "run")
     if (Inventory.has("key", 1)) Entity.tweenTo("gate", 700, 180, 0.5)
-    if (Combat.hp("slime") <= 0 && !Quest.isComplete("open_gate")) {
+    if (!Combat.isActive() && Combat.actorHp("slime") <= 0 && !Quest.isComplete("open_gate")) {
       Quest.complete("open_gate")
       Entity.emitParticles("slime", 24)
       CameraFx.shake(8, 0.25)
