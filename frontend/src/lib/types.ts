@@ -18,6 +18,7 @@ export type ProjectConfig = {
   scenes?: Array<{ name: string; path: string }>;
   scripts?: Array<{ name: string; path: string }>;
   dialogues?: Array<{ name: string; path: string }>;
+  combat?: { path: string };
   window?: { width?: number; height?: number; title?: string };
 };
 
@@ -65,6 +66,45 @@ export type DialogueChoice = {
   next?: string;
   when?: string;
   actions?: Array<Record<string, unknown>>;
+};
+
+export type CombatDocument = {
+  actors: CombatActor[];
+  skills: CombatSkill[];
+  encounters: CombatEncounter[];
+};
+
+export type CombatActor = {
+  id: string;
+  name: string;
+  side: 'party' | 'enemy';
+  level?: number;
+  hp: number;
+  mp?: number;
+  attack: number;
+  defense: number;
+  speed: number;
+  xp?: number;
+  skills?: string[];
+};
+
+export type CombatSkill = {
+  id: string;
+  name: string;
+  kind?: 'damage' | 'heal';
+  power?: number;
+  mpCost?: number;
+  target?: 'enemy' | 'ally' | 'self';
+  message?: string;
+};
+
+export type CombatEncounter = {
+  id: string;
+  party: string[];
+  enemies: string[];
+  rewards?: { xp?: number; gold?: number };
+  onWinScene?: string;
+  onLoseScene?: string;
 };
 
 export type DiagnosticSeverity = 'error' | 'warning' | 'info';

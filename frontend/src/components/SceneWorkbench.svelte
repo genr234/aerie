@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { Grid3x3, ZoomIn, ZoomOut, Plus } from "@lucide/svelte";
+  import { Bot, Camera, Grid3x3, Plus, Shield, Swords, Zap, ZoomIn, ZoomOut } from "@lucide/svelte";
   import { vfs, selectedPath, selection, sceneDecls, showGrid } from "../lib/stores";
   import { parseScene } from "../lib/project";
-  import { updateSceneField } from "../lib/actions";
+  import { addEntityPreset, updateSceneField, type EntityPreset } from "../lib/actions";
   import SceneCanvas from "./SceneCanvas.svelte";
   import type { SceneEntity } from "../lib/types";
 
@@ -52,6 +52,10 @@
     });
   }
 
+  function addPreset(preset: EntityPreset) {
+    addEntityPreset($selectedPath, preset);
+  }
+
   function clampZoom(z: number): number {
     return Math.max(0.1, Math.min(5.0, Math.round(z * 100) / 100));
   }
@@ -82,6 +86,24 @@
       </div>
 
       <div class="scene-toolbar-right">
+        <div class="preset-strip" aria-label="Entity presets">
+          <button class="icon-button" onclick={() => addPreset("player")} title="Add player" aria-label="Add player">
+            <Bot size={16} />
+          </button>
+          <button class="icon-button" onclick={() => addPreset("wall")} title="Add solid wall" aria-label="Add solid wall">
+            <Shield size={16} />
+          </button>
+          <button class="icon-button" onclick={() => addPreset("trigger")} title="Add trigger" aria-label="Add trigger">
+            <Zap size={16} />
+          </button>
+          <button class="icon-button" onclick={() => addPreset("enemy")} title="Add combat enemy" aria-label="Add combat enemy">
+            <Swords size={16} />
+          </button>
+          <button class="icon-button" onclick={() => addPreset("camera")} title="Add camera" aria-label="Add camera">
+            <Camera size={16} />
+          </button>
+        </div>
+
         <label class="compact-color-label" title="Background color">
           <input
             type="color"

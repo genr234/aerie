@@ -44,6 +44,7 @@ import { writeScene } from './project';
         name: dialogue.id,
         path: `assets/dialogues/${dialogue.id}.json`,
       })),
+      combat: { path: "assets/combat/combat.json" },
       window: { width: 800, height: 450, title },
     };
     next = writeText(
@@ -63,6 +64,11 @@ import { writeScene } from './project';
         `assets/dialogues/${dialogue.id}.json`,
         `${JSON.stringify(dialogue, null, 2)}\n`,
       );
+    next = writeText(
+      next,
+      "assets/combat/combat.json",
+      `${JSON.stringify(defaultCombat(), null, 2)}\n`,
+    );
     next = writeText(
       next,
       "assets/scripts/main.wren",
@@ -297,9 +303,69 @@ import { writeScene } from './project';
               },
             },
           },
+          {
+            tag: "combat_trigger",
+            components: {
+              Trigger: {
+                bounds: [500, 150, 90, 130],
+                oneShot: true,
+                action: { startCombat: { encounter: "slime_duo" } },
+              },
+            },
+          },
         ],
       },
     ];
+  }
+
+  export function defaultCombat() {
+    return {
+      actors: [
+        {
+          id: "hero",
+          name: "Hero",
+          side: "party",
+          level: 1,
+          hp: 28,
+          mp: 8,
+          attack: 7,
+          defense: 2,
+          speed: 7,
+          skills: ["fire"],
+        },
+        {
+          id: "slime",
+          name: "Slime",
+          side: "enemy",
+          level: 1,
+          hp: 12,
+          mp: 0,
+          attack: 4,
+          defense: 1,
+          speed: 4,
+          xp: 5,
+        },
+      ],
+      skills: [
+        {
+          id: "fire",
+          name: "Fire",
+          kind: "damage",
+          power: 6,
+          mpCost: 3,
+          target: "enemy",
+          message: "A bright flame lands.",
+        },
+      ],
+      encounters: [
+        {
+          id: "slime_duo",
+          party: ["hero"],
+          enemies: ["slime", "slime"],
+          rewards: { xp: 10, gold: 3 },
+        },
+      ],
+    };
   }
 
   export function twoRoomScenes(): SceneDocument[] {

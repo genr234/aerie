@@ -12,6 +12,12 @@ export type PreviewLog = {
   line: string;
 };
 
+type Unlisten = () => void;
+
+const previewLogCallbacks = new Set<(log: PreviewLog) => void>();
+let previewLogUnlisten: Unlisten | undefined;
+let previewLogListenPromise: Promise<Unlisten> | undefined;
+
 export async function startPreview(vfs: Vfs): Promise<string> {
   assertTauri();
   return invoke<string>('start_preview', { files: toPreviewFiles(vfs) });
@@ -40,7 +46,24 @@ export async function exportWebBundle(destination: string, vfs: Vfs): Promise<st
 
 export async function listenPreviewLogs(onLog: (log: PreviewLog) => void): Promise<() => void> {
   if (!isTauriRuntime()) return () => {};
-  return listen<PreviewLog>('preview-log', (event) => onLog(event.payload));
+  previewLogCallbacks.add(onLog);
+  if (!previewLogListenPromise) {
+    previewLogListenPromise = listen<PreviewLog>('preview-log', (event) => {
+      for (const callback of previewLogCallbacks) callback(event.payload);
+    }).then((unlisten) => {
+      previewLogUnlisten = unlisten;
+      return unlisten;
+    });
+  }
+  await previewLogListenPromise;
+  return () => {
+    previewLogCallbacks.delete(onLog);
+    if (previewLogCallbacks.size === 0 && previewLogUnlisten) {
+      previewLogUnlisten();
+      previewLogUnlisten = undefined;
+      previewLogListenPromise = undefined;
+    }
+  };
 }
 
 function assertTauri(): void {

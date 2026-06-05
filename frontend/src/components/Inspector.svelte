@@ -4,17 +4,17 @@
   import { selection, vfs, paths, sceneDecls, dialogueDecls } from "../lib/stores";
   import {
     moveSelectedEntity, duplicateEntity, deleteEntity, updateEntityTag,
-    addComponent, removeComponent, updateComponent, updateTriggerAction,
-    updateTriggerActionJson, updateStartDialogueLabel, updateStartDialogueId,
+    addComponent, removeComponent, updateComponent,
     isStartDialogueAction, startDialogueId, startDialogueLabel,
     array2, array4, numberOf
   } from "../lib/actions";
-  import { COMPONENTS } from "../lib/project";
+  import { COMPONENT_CATEGORIES, componentsForCategory } from "../lib/componentRegistry";
   import { parseScene } from "../lib/project";
   import type { SceneEntity } from "../lib/types";
 
   export let collapsed = false;
   const dispatch = createEventDispatcher<{ toggleCollapse: void }>();
+  let componentToAdd = "";
 
   $: scenePath = $selection.type !== "file" ? $selection.scenePath : undefined;
   $: selectedScene = scenePath ? parseScene($vfs, scenePath).scene : undefined;
@@ -22,6 +22,7 @@
   $: selectedComponentName = $selection.type === "component" ? $selection.component : undefined;
   $: assetPaths = $paths.filter((path) => path.startsWith("assets/") && /\.(png|jpg|jpeg)$/i.test(path));
   $: entityKey = $selection.type !== "file" ? `${$selection.scenePath}:${$selection.entityIndex}` : null;
+  $: componentToAdd = firstAvailableComponent(selectedEntity);
 
   // Extract component value from the already-reactive selectedEntity — avoids
   // get()-based store reads so Svelte can track the dependency chain correctly.
@@ -39,6 +40,58 @@
       entityIndex: $selection.entityIndex,
       component,
     };
+  }
+
+  function firstAvailableComponent(entity: SceneEntity | undefined): string {
+    if (!entity) return "";
+    for (const category of COMPONENT_CATEGORIES) {
+      for (const definition of componentsForCategory(category)) {
+        if (!entity.components[definition.name]) return definition.name;
+      }
+    }
+    return "";
+  }
+
+  function addSelectedComponent() {
+    if (!componentToAdd) return;
+    addComponent(componentToAdd);
+  }
+
+  function updateAction(component: "Trigger" | "Interactable", action: Record<string, unknown>) {
+    const current = getComponent(selectedEntity, component);
+    const next: Record<string, unknown> = { ...current, action };
+    delete next.actions;
+    updateComponent(component, next);
+  }
+
+  function updateActionsJson(component: "Trigger" | "Interactable", text: string) {
+    try {
+      const parsed = JSON.parse(text);
+      const current = getComponent(selectedEntity, component);
+      if (Array.isArray(parsed)) {
+        const next: Record<string, unknown> = { ...current, actions: parsed };
+        delete next.action;
+        updateComponent(component, next);
+      } else {
+        const next: Record<string, unknown> = { ...current, action: parsed };
+        delete next.actions;
+        updateComponent(component, next);
+      }
+    } catch {
+      // Diagnostics will surface invalid saved JSON; this avoids clobbering valid state.
+    }
+  }
+
+  function actionJson(component: "Trigger" | "Interactable") {
+    const current = getComponent(selectedEntity, component);
+    return JSON.stringify(current.actions ?? current.action ?? {}, null, 2);
+  }
+
+  function updateDialogueActionField(component: "Trigger" | "Interactable", field: "id" | "label", value: string) {
+    const current = getComponent(selectedEntity, component);
+    const action = current.action as any;
+    const dialogue = action?.startDialogue ?? {};
+    updateAction(component, { startDialogue: { ...dialogue, [field]: value || undefined } });
   }
 </script>
 
@@ -93,16 +146,33 @@
             /></label
           >
           <div class="component-actions">
-            {#each COMPONENTS as component}
-              <button
-                class:active={selectedComponentName === component}
-                on:click={() =>
-                  selectedEntity.components[component]
-                    ? selectComponent(component)
-                    : addComponent(component)}
-                >{selectedEntity.components[component] ? component : `+ ${component}`}</button
-              >
-            {/each}
+            <div class="component-list">
+              {#each Object.keys(selectedEntity.components) as component}
+                <button
+                  class:active={selectedComponentName === component}
+                  on:click={() => selectComponent(component)}
+                  >{component}</button
+                >
+              {/each}
+            </div>
+            <div class="component-add-row">
+              <select bind:value={componentToAdd}>
+                <option value="">All components added</option>
+                {#each COMPONENT_CATEGORIES as category}
+                  {@const available = componentsForCategory(category).filter((definition) => !selectedEntity.components[definition.name])}
+                  {#if available.length > 0}
+                    <optgroup label={category}>
+                      {#each available as definition}
+                        <option value={definition.name}>{definition.name} - {definition.description}</option>
+                      {/each}
+                    </optgroup>
+                  {/if}
+                {/each}
+              </select>
+              <button class="icon-button" on:click={addSelectedComponent} disabled={!componentToAdd} title="Add component" aria-label="Add component">
+                <Plus size={16} aria-hidden="true" />
+              </button>
+            </div>
           </div>
 
           {#if selectedEntity.components.Transform}
@@ -387,6 +457,29 @@
                 /></label
               >
               <label
+                >Smoothing <input
+                  type="number"
+                  step="0.1"
+                  value={numberOf(camera.smoothing, 12)}
+                  on:change={(event) =>
+                    updateComponent("Camera", {
+                      ...camera,
+                      smoothing: Number(event.currentTarget.value),
+                    })}
+                /></label
+              >
+              <label
+                ><input
+                  type="checkbox"
+                  checked={camera.clampToScene !== false}
+                  on:change={(event) =>
+                    updateComponent("Camera", {
+                      ...camera,
+                      clampToScene: event.currentTarget.checked,
+                    })}
+                /> Clamp to scene</label
+              >
+              <label
                 >Follow Tag <input
                   value={String(camera.followTag ?? "")}
                   on:change={(event) =>
@@ -412,6 +505,210 @@
                       ...controller,
                       speed: Number(event.currentTarget.value),
                     })}
+                /></label
+              >
+              <label
+                >Mode
+                <select
+                  value={String(controller.mode ?? "smooth4")}
+                  on:change={(event) =>
+                    updateComponent("PlayerController", {
+                      ...controller,
+                      mode: event.currentTarget.value,
+                    })}
+                >
+                  <option value="smooth4">smooth4</option>
+                  <option value="smooth8">smooth8</option>
+                  <option value="grid4">grid4</option>
+                </select>
+              </label>
+              <label
+                >Step Size <input
+                  type="number"
+                  value={numberOf(controller.stepSize, 16)}
+                  on:change={(event) =>
+                    updateComponent("PlayerController", {
+                      ...controller,
+                      stepSize: Number(event.currentTarget.value),
+                    })}
+                /></label
+              >
+              <label
+                >Step Time <input
+                  type="number"
+                  step="0.01"
+                  value={numberOf(controller.stepTime, 0.12)}
+                  on:change={(event) =>
+                    updateComponent("PlayerController", {
+                      ...controller,
+                      stepTime: Number(event.currentTarget.value),
+                    })}
+                /></label
+              >
+            </fieldset>
+          {/if}
+
+          {#if selectedEntity.components.BoxCollider}
+            {@const box = getComponent(selectedEntity, "BoxCollider")}
+            {@const offset = array2(box.offset, [0, 0])}
+            <fieldset>
+              <legend>Box Collider</legend>
+              <label
+                >Width <input
+                  type="number"
+                  value={numberOf(box.width, 32)}
+                  on:change={(event) =>
+                    updateComponent("BoxCollider", {
+                      ...box,
+                      width: Number(event.currentTarget.value),
+                      offset,
+                    })}
+                /></label
+              >
+              <label
+                >Height <input
+                  type="number"
+                  value={numberOf(box.height, 24)}
+                  on:change={(event) =>
+                    updateComponent("BoxCollider", {
+                      ...box,
+                      height: Number(event.currentTarget.value),
+                      offset,
+                    })}
+                /></label
+              >
+              <label
+                >Offset X <input
+                  type="number"
+                  value={offset[0]}
+                  on:change={(event) =>
+                    updateComponent("BoxCollider", {
+                      ...box,
+                      offset: [Number(event.currentTarget.value), offset[1]],
+                    })}
+                /></label
+              >
+              <label
+                >Offset Y <input
+                  type="number"
+                  value={offset[1]}
+                  on:change={(event) =>
+                    updateComponent("BoxCollider", {
+                      ...box,
+                      offset: [offset[0], Number(event.currentTarget.value)],
+                    })}
+                /></label
+              >
+            </fieldset>
+          {/if}
+
+          {#if selectedEntity.components.Interactable}
+            {@const interactable = getComponent(selectedEntity, "Interactable")}
+            {@const bounds = array4(interactable.bounds, [0, 0, 80, 80])}
+            <fieldset>
+              <legend>Interactable</legend>
+              <label
+                >X <input type="number" value={bounds[0]} on:change={(event) => updateComponent("Interactable", { ...interactable, bounds: [Number(event.currentTarget.value), bounds[1], bounds[2], bounds[3]] })} /></label
+              >
+              <label
+                >Y <input type="number" value={bounds[1]} on:change={(event) => updateComponent("Interactable", { ...interactable, bounds: [bounds[0], Number(event.currentTarget.value), bounds[2], bounds[3]] })} /></label
+              >
+              <label
+                >Width <input type="number" value={bounds[2]} on:change={(event) => updateComponent("Interactable", { ...interactable, bounds: [bounds[0], bounds[1], Number(event.currentTarget.value), bounds[3]] })} /></label
+              >
+              <label
+                >Height <input type="number" value={bounds[3]} on:change={(event) => updateComponent("Interactable", { ...interactable, bounds: [bounds[0], bounds[1], bounds[2], Number(event.currentTarget.value)] })} /></label
+              >
+              <label
+                >Prompt <input
+                  value={String(interactable.prompt ?? "")}
+                  on:change={(event) =>
+                    updateComponent("Interactable", {
+                      ...interactable,
+                      prompt: event.currentTarget.value || undefined,
+                    })}
+                /></label
+              >
+              <label
+                ><input
+                  type="checkbox"
+                  checked={interactable.repeatable !== false}
+                  on:change={(event) =>
+                    updateComponent("Interactable", {
+                      ...interactable,
+                      repeatable: event.currentTarget.checked,
+                    })}
+                /> Repeatable</label
+              >
+              <div class="action-buttons">
+                <button on:click={() => updateAction("Interactable", { showMessage: { text: "Hello", duration: 2 } })}>showMessage</button>
+                <button on:click={() => updateAction("Interactable", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button>
+                <button on:click={() => updateAction("Interactable", { setFlag: { name: "flag", value: true } })}>setFlag</button>
+                <button on:click={() => updateAction("Interactable", { startDialogue: {} })}>startDialogue</button>
+                <button on:click={() => updateAction("Interactable", { startCombat: { encounter: "slime_duo" } })}>startCombat</button>
+              </div>
+              {#if isStartDialogueAction(interactable.action)}
+                <label
+                  >Dialogue
+                  <select value={startDialogueId(interactable.action)} on:change={(event) => updateDialogueActionField("Interactable", "id", event.currentTarget.value)}>
+                    <option value="">First declared dialogue</option>
+                    {#each $dialogueDecls as dialogue}
+                      <option value={dialogue.name}>{dialogue.name}</option>
+                    {/each}
+                  </select>
+                </label>
+                <label
+                  >Dialogue Label <input value={startDialogueLabel(interactable.action)} on:change={(event) => updateDialogueActionField("Interactable", "label", event.currentTarget.value)} /></label
+                >
+              {/if}
+              <label
+                >Action JSON <textarea
+                  class="component-json"
+                  value={actionJson("Interactable")}
+                  on:change={(event) => updateActionsJson("Interactable", event.currentTarget.value)}
+                ></textarea></label
+              >
+            </fieldset>
+          {/if}
+
+          {#if selectedEntity.components.Portal}
+            {@const portal = getComponent(selectedEntity, "Portal")}
+            {@const bounds = array4(portal.bounds, [0, 0, 80, 80])}
+            <fieldset>
+              <legend>Portal</legend>
+              <label>X <input type="number" value={bounds[0]} on:change={(event) => updateComponent("Portal", { ...portal, bounds: [Number(event.currentTarget.value), bounds[1], bounds[2], bounds[3]] })} /></label>
+              <label>Y <input type="number" value={bounds[1]} on:change={(event) => updateComponent("Portal", { ...portal, bounds: [bounds[0], Number(event.currentTarget.value), bounds[2], bounds[3]] })} /></label>
+              <label>Width <input type="number" value={bounds[2]} on:change={(event) => updateComponent("Portal", { ...portal, bounds: [bounds[0], bounds[1], Number(event.currentTarget.value), bounds[3]] })} /></label>
+              <label>Height <input type="number" value={bounds[3]} on:change={(event) => updateComponent("Portal", { ...portal, bounds: [bounds[0], bounds[1], bounds[2], Number(event.currentTarget.value)] })} /></label>
+              <label
+                >Scene
+                <select
+                  value={String(portal.scene ?? "")}
+                  on:change={(event) => updateComponent("Portal", { ...portal, scene: event.currentTarget.value })}
+                >
+                  <option value="">-- Scene --</option>
+                  {#each $sceneDecls as scene}
+                    <option value={scene.name}>{scene.name}</option>
+                  {/each}
+                </select>
+              </label>
+              <label
+                >Spawn <input
+                  value={String(portal.spawn ?? "")}
+                  on:change={(event) => updateComponent("Portal", { ...portal, spawn: event.currentTarget.value || undefined })}
+                /></label
+              >
+            </fieldset>
+          {/if}
+
+          {#if selectedEntity.components.SpawnPoint}
+            {@const spawn = getComponent(selectedEntity, "SpawnPoint")}
+            <fieldset>
+              <legend>Spawn Point</legend>
+              <label
+                >Name <input
+                  value={String(spawn.name ?? "")}
+                  on:change={(event) => updateComponent("SpawnPoint", { ...spawn, name: event.currentTarget.value })}
                 /></label
               >
             </fieldset>
@@ -500,25 +797,29 @@
               <div class="action-buttons">
                 <button
                   on:click={() =>
-                    updateTriggerAction({
+                    updateAction("Trigger", {
                       showMessage: { text: "Hello", duration: 2 },
                     })}>showMessage</button
                 >
                 <button
                   on:click={() =>
-                    updateTriggerAction({
+                    updateAction("Trigger", {
                       changeScene: { name: $sceneDecls[0]?.name ?? "" },
                     })}>changeScene</button
                 >
                 <button
                   on:click={() =>
-                    updateTriggerAction({
+                    updateAction("Trigger", {
                       setFlag: { name: "flag", value: true },
                     })}>setFlag</button
                 >
                 <button
-                  on:click={() => updateTriggerAction({ startDialogue: {} })}
+                  on:click={() => updateAction("Trigger", { startDialogue: {} })}
                   >startDialogue</button
+                >
+                <button
+                  on:click={() => updateAction("Trigger", { startCombat: { encounter: "slime_duo" } })}
+                  >startCombat</button
                 >
               </div>
               {#if isStartDialogueAction(trigger.action)}
@@ -527,7 +828,7 @@
                   <select
                     value={startDialogueId(trigger.action)}
                     on:change={(event) =>
-                      updateStartDialogueId(event.currentTarget.value)}
+                      updateDialogueActionField("Trigger", "id", event.currentTarget.value)}
                   >
                     <option value="">First declared dialogue</option>
                     {#each $dialogueDecls as dialogue}
@@ -539,16 +840,16 @@
                   >Dialogue Label <input
                     value={startDialogueLabel(trigger.action)}
                     on:change={(event) =>
-                      updateStartDialogueLabel(event.currentTarget.value)}
+                      updateDialogueActionField("Trigger", "label", event.currentTarget.value)}
                   /></label
                 >
               {/if}
               <label
                 >Action JSON <textarea
                   class="component-json"
-                  value={JSON.stringify(trigger.action ?? {}, null, 2)}
+                  value={actionJson("Trigger")}
                   on:change={(event) =>
-                    updateTriggerActionJson(event.currentTarget.value)}
+                    updateActionsJson("Trigger", event.currentTarget.value)}
                 ></textarea></label
               >
             </fieldset>

@@ -9,7 +9,7 @@ import type {
 } from './types';
 import type { PreviewLog } from './previewRuntime';
 
-export type MainTab = "scene" | "script" | "dialogue" | "settings" | "raw" | "asset";
+export type MainTab = "scene" | "script" | "dialogue" | "combat" | "settings" | "raw" | "asset";
 export type BottomTab = "diagnostics" | "output" | "problems";
 export type AppScreen = "projects" | "editor";
 
@@ -19,6 +19,13 @@ export type DragState = {
   startX: number;
   startY: number;
   original: [number, number];
+};
+
+export type RuntimeProblem = {
+  severity: "error" | "warning" | "info";
+  source: string;
+  message: string;
+  raw: string;
 };
 
 // Core State
@@ -63,12 +70,14 @@ export const assetRenameName = writable<string>("");
 export const diagnostics = writable<Diagnostic[]>([]);
 export const runtimeDiagnostics = writable<Diagnostic[]>([]);
 export const output = writable<PreviewLog[]>([]);
+export const runtimeProblems = writable<RuntimeProblem[]>([]);
 
 // Derived State
 export const paths = derived(vfs, $vfs => Array.from($vfs.keys()).sort());
 export const sceneDecls = derived(project, $project => $project?.scenes ?? []);
 export const scriptDecls = derived(project, $project => $project?.scripts ?? []);
 export const dialogueDecls = derived(project, $project => $project?.dialogues ?? []);
+export const combatDecl = derived(project, $project => $project?.combat);
 
 export const canUndo = derived(undoStack, $stack => $stack.length > 0);
 export const canRedo = derived(redoStack, $stack => $stack.length > 0);

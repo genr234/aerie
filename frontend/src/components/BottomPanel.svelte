@@ -1,8 +1,8 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
-  import { ChevronUp, ChevronDown } from "@lucide/svelte";
-  import { activeBottomTab, output, runtimeDiagnostics, selectedPath } from "../lib/stores";
-  import { selectFile } from "../lib/actions";
+  import { ChevronUp, ChevronDown, Copy } from "@lucide/svelte";
+  import { activeBottomTab, diagnostics, output, runtimeProblems } from "../lib/stores";
+  import { repairDiagnostic, selectFile } from "../lib/actions";
   import type { Diagnostic } from "../lib/types";
 
   export let collapsed = false;
@@ -13,6 +13,18 @@
       diagnostic.path,
       diagnostic.path.endsWith(".json") ? "scene" : "raw",
     );
+  }
+
+  async function copyText(text: string) {
+    await navigator.clipboard?.writeText(text);
+  }
+
+  function problemText(problem: { severity: string; source: string; message: string }) {
+    return `[${problem.severity}] ${problem.source}: ${problem.message}`;
+  }
+
+  function allProblemsText() {
+    return $runtimeProblems.map(problemText).join("\n");
   }
 </script>
 
@@ -47,23 +59,51 @@
     </div>
   {:else if $activeBottomTab === "diagnostics"}
     <div class="diagnostics">
-      {#if $runtimeDiagnostics.length === 0}
+      {#if $diagnostics.length === 0}
         <p>No diagnostics.</p>
       {:else}
-        {#each $runtimeDiagnostics as diagnostic}
-          <button
+        {#each $diagnostics as diagnostic}
+          <div
+            class="diagnostic-row"
             class:diag-error={diagnostic.severity === "error"}
             class:diag-warning={diagnostic.severity === "warning"}
-            on:click={() => navigateDiagnostic(diagnostic)}
           >
-            <strong>{diagnostic.severity}</strong>: {diagnostic.message} ({diagnostic.path})
-          </button>
+            <button on:click={() => navigateDiagnostic(diagnostic)}>
+              <strong>{diagnostic.severity}</strong>: {diagnostic.message} ({diagnostic.path})
+            </button>
+            <button class="mini-repair" on:click={() => repairDiagnostic(diagnostic)}>Repair</button>
+          </div>
         {/each}
       {/if}
     </div>
   {:else if $activeBottomTab === "problems"}
-    <div class="problems log-list">
-      <p>No problems.</p>
+    <div class="problems">
+      {#if $runtimeProblems.length === 0}
+        <p>No problems.</p>
+      {:else}
+        <div class="problems-toolbar">
+          <span>{$runtimeProblems.length} problem{$runtimeProblems.length === 1 ? "" : "s"}</span>
+          <button class="mini-repair" on:click={() => copyText(allProblemsText())}>
+            <Copy size={13} /> Copy all
+          </button>
+        </div>
+        {#each $runtimeProblems as problem}
+          <div
+            class="problem-row"
+            class:diag-error={problem.severity === "error"}
+            class:diag-warning={problem.severity === "warning"}
+          >
+            <div class="problem-body">
+              <strong>{problem.severity}</strong>
+              <span>{problem.source}</span>
+              <code>{problem.message}</code>
+            </div>
+            <button class="mini-repair" title="Copy problem" aria-label="Copy problem" on:click={() => copyText(problemText(problem))}>
+              <Copy size={13} />
+            </button>
+          </div>
+        {/each}
+      {/if}
     </div>
   {/if}
   {/if}

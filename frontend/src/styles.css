@@ -573,6 +573,14 @@ small,
   flex-shrink: 0;
 }
 
+.preset-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 8px;
+  border-right: 1px solid #d6dde1;
+}
+
 .scene-toolbar-left .scene-name {
   font-size: 14px;
   color: #182028;
@@ -755,6 +763,109 @@ small,
   z-index: 2;
 }
 
+.combat-workbench {
+  height: 100%;
+  overflow: auto;
+  padding: 18px;
+}
+
+.combat-section {
+  margin-bottom: 22px;
+}
+
+.combat-section header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.combat-section h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.combat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.combat-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.combat-card label {
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.combat-card input,
+.combat-card select {
+  width: 100%;
+}
+
+.combat-card .mini {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.combat-card .full-span {
+  grid-column: 1 / -1;
+}
+
+.combat-picker {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 30px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.chip-list button {
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid #c8d0d5;
+  border-radius: 999px;
+  background: #fff;
+  color: #26313a;
+  font-size: 12px;
+}
+
+.chip-list button.active {
+  border-color: #2d7df0;
+  background: #e8f1ff;
+  color: #174c9f;
+}
+
+.chip-list em {
+  align-self: center;
+  color: #7a858d;
+  font-size: 12px;
+  font-style: normal;
+}
+
 /* Sprite image */
 .entity-sprite-img {
   width: 100%;
@@ -893,14 +1004,14 @@ small,
 }
 
 .diagnostics,
-.log-list {
+.log-list,
+.problems {
   height: calc(100% - 43px);
   overflow: auto;
   padding: 8px;
 }
 
-.diagnostics button,
-.diagnostics > div {
+.diagnostic-row {
   display: block;
   width: 100%;
   border: 1px solid #d6dde1;
@@ -908,6 +1019,83 @@ small,
   background: #ffffff;
   margin-bottom: 8px;
   padding: 8px;
+}
+
+.diagnostic-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostic-row > button:first-child {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.mini-repair {
+  min-height: 26px;
+  padding: 3px 8px;
+  border: 1px solid #c8d0d5;
+  border-radius: 5px;
+  background: #eef4f8;
+  color: #26313a;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.problems-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #5f6a72;
+  font-size: 12px;
+}
+
+.problem-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid #d6dde1;
+  border-radius: 6px;
+  background: #ffffff;
+  margin-bottom: 8px;
+  padding: 8px;
+}
+
+.problem-body {
+  display: grid;
+  grid-template-columns: auto minmax(80px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.problem-body strong {
+  text-transform: uppercase;
+  font-size: 11px;
+}
+
+.problem-body span {
+  color: #5f6a72;
+  font-size: 12px;
+}
+
+.problem-body code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  color: #26313a;
 }
 
 .diagnostics strong {
@@ -962,12 +1150,23 @@ small,
   font-size: 13px;
 }
 
-.component-actions,
+.component-actions {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+
+.component-list,
 .action-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 7px;
-  margin: 4px 0 8px;
+}
+
+.component-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
 }
 
 fieldset {

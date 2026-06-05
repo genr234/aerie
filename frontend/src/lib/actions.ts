@@ -4,6 +4,7 @@ import {
   vfs, projectRoot, project, dirty, status, undoStack, redoStack,
   diagnostics, runtimeDiagnostics, activeBottomTab, activeMainTab,
   selection, selectedPath, rawText, assetRenameName, output, previewRunning,
+  runtimeProblems,
   newProjectTitle, newProjectId, newProjectTemplate,
   showCreateScene, showCreateScript, showCreateDialogue,
   newSceneName, newScriptName, newDialogueName, currentScreen
@@ -16,8 +17,9 @@ import {
 } from './vfs';
 import {
   parseProject, validateAll, fatalDiagnostics, parseScene, parseDialogue,
-  writeScene, writeDialogue
+  writeScene, writeDialogue, parseCombat, writeCombat
 } from './project';
+import { defaultComponent } from './componentRegistry';
 import {
   deleteDialogueNodeAndClearLinks,
   duplicateDialogueNode as duplicateDialogueNodeInDocument,
@@ -28,7 +30,7 @@ import {
 } from './dialogueGraph';
 import { createTemplateProject } from './templates';
 import type { MainTab } from './stores';
-import type { DialogueChoice, DialogueNode, DialogueNodePosition, ProjectConfig, SceneDocument, SceneEntity, Selection, Vfs } from './types';
+import type { CombatDocument, DialogueChoice, DialogueNode, DialogueNodePosition, ProjectConfig, SceneDocument, SceneEntity, Selection, Vfs } from './types';
 
 type OpenLoadedProjectOptions = {
   dirtyPaths?: Iterable<string>;
@@ -72,6 +74,71 @@ export function selectScene(path: string) {
   rawText.set(readText(get(vfs), path) ?? "");
   selection.set({ type: "file", path });
   activeMainTab.set("scene");
+}
+
+export function selectCombat(path: string) {
+  selectedPath.set(path);
+  rawText.set(readText(get(vfs), path) ?? "");
+  selection.set({ type: "file", path });
+  activeMainTab.set("combat");
+}
+
+export function repairDiagnostic(diagnostic: { path: string; message: string }) {
+  const message = diagnostic.message;
+  let repaired = false;
+
+  const missingTexture = message.match(/^entities\[(\d+)\]\.Sprite\.texture missing asset /);
+  if (missingTexture) {
+    const index = Number(missingTexture[1]);
+    mutateScene(diagnostic.path, (scene) => {
+      const sprite = scene.entities[index]?.components.Sprite as Record<string, unknown> | undefined;
+      if (sprite) delete sprite.texture;
+      repaired = true;
+    });
+  }
+
+  const missingFollow = message.match(/^entities\[(\d+)\]\.Camera\.followTag targets missing tag /);
+  if (missingFollow) {
+    const index = Number(missingFollow[1]);
+    mutateScene(diagnostic.path, (scene) => {
+      const camera = scene.entities[index]?.components.Camera as Record<string, unknown> | undefined;
+      if (camera) delete camera.followTag;
+      repaired = true;
+    });
+  }
+
+  const missingScene = message.match(/^entities\[(\d+)\]\.Trigger targets missing scene /);
+  if (missingScene) {
+    const index = Number(missingScene[1]);
+    mutateScene(diagnostic.path, (scene) => {
+      const trigger = scene.entities[index]?.components.Trigger as Record<string, unknown> | undefined;
+      if (trigger) delete trigger.action;
+      repaired = true;
+    });
+  }
+
+  const missingSkill = message.match(/^actors\[(\d+)\] references missing skill '([^']+)'/);
+  if (missingSkill) {
+    const index = Number(missingSkill[1]);
+    const skillId = missingSkill[2];
+    mutateCombat((combat) => {
+      combat.actors[index].skills = (combat.actors[index].skills ?? []).filter((id) => id !== skillId);
+      repaired = true;
+    });
+  }
+
+  const missingActor = message.match(/^encounters\[(\d+)\] references missing actor '([^']+)'/);
+  if (missingActor) {
+    const index = Number(missingActor[1]);
+    const actorId = missingActor[2];
+    mutateCombat((combat) => {
+      combat.encounters[index].party = combat.encounters[index].party.filter((id) => id !== actorId);
+      combat.encounters[index].enemies = combat.encounters[index].enemies.filter((id) => id !== actorId);
+      repaired = true;
+    });
+  }
+
+  status.set(repaired ? "Repaired diagnostic." : "No automatic repair is available for that diagnostic.");
 }
 
 export function clearHistory() {
@@ -196,6 +263,7 @@ export async function closeProjectToProjects() {
   project.set(undefined);
   diagnostics.set([]);
   runtimeDiagnostics.set([]);
+  runtimeProblems.set([]);
   output.set([]);
   previewRunning.set(false);
   selection.set({ type: "file", path: "game.json" });
@@ -309,9 +377,43 @@ export async function play() {
   try {
     output.set([]);
     runtimeDiagnostics.set([]);
+    runtimeProblems.set([]);
     refreshProject();
     const resultStatus = await startPreview(currentVfs);
     status.set(resultStatus);
+    previewRunning.set(true);
+    activeBottomTab.set("output");
+  } catch (error) {
+    previewRunning.set(false);
+    status.set(messageOf(error));
+  }
+}
+
+export async function playFromCurrentScene() {
+  flushActiveEditorBuffer();
+  const currentVfs = get(vfs);
+  const currentProject = parseProject(currentVfs).project;
+  const scene = (currentProject?.scenes ?? []).find((decl) => decl.path === get(selectedPath));
+  if (!currentProject || !scene) {
+    status.set("Select a scene to play from.");
+    activeMainTab.set("scene");
+    return;
+  }
+  const previewProject = { ...currentProject, start_scene: scene.name };
+  const previewVfs = writeText(currentVfs, "game.json", `${JSON.stringify(cleanUndefined(previewProject), null, 2)}\n`);
+  const fatalNow = fatalDiagnostics(validateAll(previewVfs)).length;
+  if (fatalNow > 0) {
+    status.set("Fix fatal diagnostics before playing.");
+    activeBottomTab.set("diagnostics");
+    return;
+  }
+  try {
+    output.set([]);
+    runtimeDiagnostics.set([]);
+    runtimeProblems.set([]);
+    refreshProject();
+    const resultStatus = await startPreview(previewVfs);
+    status.set(`${resultStatus} Starting at ${scene.name}.`);
     previewRunning.set(true);
     activeBottomTab.set("output");
   } catch (error) {
@@ -407,6 +509,27 @@ export function updateSceneField(path: string, field: string, value: any) {
   mutateScene(path, (scene) => {
     (scene as Record<string, unknown>)[field] = value;
   });
+}
+
+export type EntityPreset = "player" | "wall" | "trigger" | "enemy" | "camera";
+
+export function addEntityPreset(path: string, preset: EntityPreset) {
+  const parsed = parseScene(get(vfs), path).scene;
+  if (!parsed) return;
+  const center: [number, number] = [
+    Math.round((parsed.size?.width ?? 800) / 2 - 24),
+    Math.round((parsed.size?.height ?? 450) / 2 - 24),
+  ];
+  let createdIndex = -1;
+  mutateScene(path, (scene) => {
+    const used = new Set((scene.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+    const entity = presetEntity(preset, center, used);
+    scene.entities = [...(scene.entities ?? []), entity];
+    createdIndex = scene.entities.length - 1;
+  });
+  if (createdIndex >= 0) {
+    selection.set({ type: "entity", scenePath: path, entityIndex: createdIndex });
+  }
 }
 
 export function updateProjectField(field: keyof ProjectConfig, value: unknown) {
@@ -754,21 +877,67 @@ function mutateCurrentDialogue(mutator: (dialogue: ReturnType<typeof parseDialog
   refreshProject();
 }
 
-function defaultComponent(name: string): Record<string, unknown> {
-  switch (name) {
-    case "Transform": return { position: [0, 0], scale: [1, 1], rotation: 0 };
-    case "Sprite": return { texture: "reference-game/player.png" };
-    case "Circle": return { radius: 16, color: "#ffffff" };
-    case "Rect": return { width: 64, height: 48, color: "#ffffff" };
-    case "Camera": return { offset: [400, 225], zoom: 1 };
-    case "PlayerController": return { speed: 100 };
-    case "Solid": return { enabled: true };
-    case "Animation": return { current: "idle", clips: [{ name: "idle", start: 0, frames: 1, fps: 1, loop: true }] };
-    case "Tilemap": return { columns: 8, rows: 6, tileWidth: 16, tileHeight: 16, tiles: Array(48).fill(0), solidTiles: [1], palette: ["#5f8f5f"] };
-    case "ParticleEmitter": return { color: "#ffffff", rate: 0, lifetime: 0.6, speed: 40, spread: 6.28, radius: 2, burst: 12 };
-    case "Tween": return { to: [128, 128], duration: 1, loop: false };
-    case "Trigger": return { bounds: [0, 0, 80, 80], oneShot: false, action: { showMessage: { text: "Hello", duration: 2 } } };
-    default: return {};
+export function mutateCombat(mutator: (combat: CombatDocument) => void) {
+  const path = get(project)?.combat?.path;
+  if (!path) return;
+  const parsed = parseCombat(get(vfs), path).combat;
+  if (!parsed) return;
+  const next = structuredClone(parsed);
+  mutator(next);
+  recordHistory();
+  vfs.set(writeText(get(vfs), path, writeCombat(next)));
+  markDirty(path);
+  rawText.set(readText(get(vfs), path) ?? "");
+  refreshProject();
+}
+
+function presetEntity(preset: EntityPreset, center: [number, number], used: Set<string>): SceneEntity {
+  switch (preset) {
+    case "player":
+      return {
+        tag: uniqueId("player", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 32, height: 40, color: "#4aa382" },
+          PlayerController: { speed: 120 },
+          Solid: { enabled: true },
+        },
+      };
+    case "wall":
+      return {
+        tag: uniqueId("wall", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 96, height: 32, color: "#4f5964" },
+          Solid: { enabled: true },
+        },
+      };
+    case "trigger":
+      return {
+        tag: uniqueId("trigger", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Trigger: { bounds: [center[0], center[1], 96, 64], oneShot: false, action: { showMessage: { text: "Hello", duration: 2 } } },
+        },
+      };
+    case "enemy":
+      return {
+        tag: uniqueId("enemy", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 36, height: 36, color: "#b85d5d" },
+          Solid: { enabled: true },
+          Trigger: { bounds: [center[0] - 12, center[1] - 12, 60, 60], oneShot: true, action: { startCombat: { encounter: "slime_duo" } } },
+        },
+      };
+    case "camera":
+      return {
+        tag: uniqueId("camera", used),
+        components: {
+          Transform: { position: [0, 0], scale: [1, 1], rotation: 0 },
+          Camera: { offset: [400, 225], zoom: 1 },
+        },
+      };
   }
 }
 

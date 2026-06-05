@@ -69,7 +69,8 @@ export async function loadReferenceProject(): Promise<Vfs> {
     'assets/reference-game/crossroads.json',
     'assets/reference-game/clearing.json',
     'assets/reference-game/player.png',
-    'assets/scripts/main.wren'
+    'assets/scripts/main.wren',
+    'assets/combat/combat.json'
   ];
   const vfs: Vfs = new Map();
   for (const path of paths) {

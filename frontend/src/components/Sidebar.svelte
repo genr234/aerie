@@ -2,10 +2,10 @@
   import { Plus, FolderOpen, Folder, File, FileCode, FileJson, Image, ChevronRight } from "@lucide/svelte";
   import {
     project, showCreateScene, showCreateScript, showCreateDialogue,
-    selectedPath, dirty, sceneDecls, scriptDecls, dialogueDecls,
+    selectedPath, dirty, sceneDecls, scriptDecls, dialogueDecls, combatDecl,
     paths
   } from "../lib/stores";
-  import { selectScene, selectFile } from "../lib/actions";
+  import { selectScene, selectFile, selectCombat } from "../lib/actions";
 
   // ---- Tree types ----
   interface TreeNode {
@@ -133,6 +133,8 @@
       selectFile(node.path, "script");
     } else if (d.has(node.path)) {
       selectFile(node.path, "dialogue");
+    } else if ($combatDecl?.path === node.path) {
+      selectCombat(node.path);
     } else {
       selectFile(node.path);
     }

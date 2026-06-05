@@ -7,6 +7,7 @@
     Save,
     Download,
     Play as PlayIcon,
+    MapPin,
     Square,
   } from "@lucide/svelte";
 
@@ -18,6 +19,8 @@
     previewRunning,
     canUndo,
     canRedo,
+    selectedPath,
+    sceneDecls,
   } from "../lib/stores";
 
   import {
@@ -28,6 +31,7 @@
     exportZip,
     exportWeb,
     play,
+    playFromCurrentScene,
     stop,
     closeProjectToProjects,
   } from "../lib/actions";
@@ -35,6 +39,7 @@
 
   $: dirtyCount = $dirty.size; // We can improve hasUnsavedEditorBuffer check later
   $: fatalCount = fatalDiagnostics($diagnostics).length;
+  $: selectedIsScene = $sceneDecls.some((scene) => scene.path === $selectedPath);
 </script>
 
 <header class="command-bar">
@@ -126,6 +131,15 @@
       aria-label="Play"
     >
       <PlayIcon size={16} aria-hidden="true" />
+    </button>
+    <button
+      class="icon-button"
+      on:click={playFromCurrentScene}
+      disabled={!selectedIsScene || $vfs.size === 0 || fatalCount > 0 || $previewRunning}
+      title="Play from current scene"
+      aria-label="Play from current scene"
+    >
+      <MapPin size={16} aria-hidden="true" />
     </button>
     <button
       class="icon-button"
