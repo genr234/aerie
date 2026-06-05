@@ -1,0 +1,47 @@
+{
+  "actors": [
+    {
+      "id": "hero",
+      "name": "Hero",
+      "side": "party",
+      "level": 1,
+      "hp": 28,
+      "mp": 8,
+      "attack": 7,
+      "defense": 2,
+      "speed": 7,
+      "skills": ["fire"]
+    },
+    {
+      "id": "slime",
+      "name": "Slime",
+      "side": "enemy",
+      "level": 1,
+      "hp": 12,
+      "mp": 0,
+      "attack": 4,
+      "defense": 1,
+      "speed": 4,
+      "xp": 5
+    }
+  ],
+  "skills": [
+    {
+      "id": "fire",
+      "name": "Fire",
+      "kind": "damage",
+      "power": 6,
+      "mpCost": 3,
+      "target": "enemy",
+      "message": "A bright flame lands."
+    }
+  ],
+  "encounters": [
+    {
+      "id": "slime_duo",
+      "party": ["hero"],
+      "enemies": ["slime", "slime"],
+      "rewards": { "xp": 10, "gold": 3 }
+    }
+  ]
+}

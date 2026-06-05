@@ -8,7 +8,7 @@
       "tag": "main_camera",
       "components": {
         "Transform": { "position": [0, 0] },
-        "Camera": { "offset": [400, 225], "zoom": 1.0, "followTag": "player" }
+        "Camera": { "offset": [400, 225], "zoom": 1.0, "smoothing": 12, "clampToScene": true, "followTag": "player" }
       }
     },
     {
@@ -51,14 +51,26 @@
       "components": {
         "Transform": { "position": [96, 238] },
         "Sprite": { "texture": "reference-game/player.png" },
-        "PlayerController": { "speed": 125 }
+        "PlayerController": { "speed": 125, "mode": "smooth4" }
+      }
+    },
+    {
+      "tag": "spawn_from_clearing",
+      "components": {
+        "Transform": { "position": [668, 238] },
+        "SpawnPoint": { "name": "from_clearing" }
       }
     },
     {
       "tag": "left_marker",
       "components": {
         "Transform": { "position": [182, 238] },
-        "Circle": { "radius": 9, "color": "#f7c95f" }
+        "Circle": { "radius": 9, "color": "#f7c95f" },
+        "Interactable": {
+          "bounds": [160, 214, 48, 52],
+          "prompt": "Read marker",
+          "action": { "showMessage": { "text": "Three lanterns point toward the old stone.", "duration": 3 } }
+        }
       }
     },
     {
@@ -86,14 +98,24 @@
       "tag": "waystone",
       "components": {
         "Transform": { "position": [548, 196] },
-        "Rect": { "width": 72, "height": 76, "color": "#6c7481" }
+        "Rect": { "width": 72, "height": 76, "color": "#6c7481" },
+        "BoxCollider": { "width": 72, "height": 76 },
+        "Solid": { "enabled": true }
       }
     },
     {
       "tag": "waystone_core",
       "components": {
         "Transform": { "position": [584, 213] },
-        "Circle": { "radius": 16, "color": "#ffe28a" }
+        "Circle": { "radius": 16, "color": "#ffe28a" },
+        "ParticleEmitter": {
+          "color": "#ffe28a",
+          "rate": 0,
+          "lifetime": 0.45,
+          "speed": 52,
+          "spread": 6.28,
+          "radius": 2
+        }
       }
     },
     {
@@ -106,10 +128,25 @@
     {
       "tag": "stone_trigger",
       "components": {
-        "Trigger": {
+        "Interactable": {
           "bounds": [510, 170, 152, 132],
-          "oneShot": true,
-          "action": { "setFlag": { "name": "stone_touched", "value": true } }
+          "prompt": "Wake waystone",
+          "repeatable": false,
+          "actions": [
+            { "setFlag": { "name": "stone_touched", "value": true } },
+            { "setFlag": { "name": "gate_open", "value": true } },
+            { "showMessage": { "text": "The waystone hums. A lantern gate opens east.", "duration": 4 } }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "east_portal",
+      "components": {
+        "Portal": {
+          "bounds": [720, 182, 52, 124],
+          "scene": "clearing",
+          "spawn": "from_crossroads"
         }
       }
     }

@@ -8,7 +8,7 @@
       "tag": "main_camera",
       "components": {
         "Transform": { "position": [0, 0] },
-        "Camera": { "offset": [400, 225], "zoom": 1.0, "followTag": "player" }
+        "Camera": { "offset": [400, 225], "zoom": 1.0, "smoothing": 12, "clampToScene": true, "followTag": "player" }
       }
     },
     {
@@ -37,7 +37,14 @@
       "components": {
         "Transform": { "position": [124, 245] },
         "Sprite": { "texture": "reference-game/player.png" },
-        "PlayerController": { "speed": 125 }
+        "PlayerController": { "speed": 125, "mode": "smooth4" }
+      }
+    },
+    {
+      "tag": "spawn_from_crossroads",
+      "components": {
+        "Transform": { "position": [124, 245] },
+        "SpawnPoint": { "name": "from_crossroads" }
       }
     },
     {
@@ -58,7 +65,12 @@
       "tag": "ring_light_a",
       "components": {
         "Transform": { "position": [328, 260] },
-        "Circle": { "radius": 10, "color": "#f8d66e" }
+        "Circle": { "radius": 10, "color": "#f8d66e" },
+        "Interactable": {
+          "bounds": [300, 232, 64, 64],
+          "prompt": "Listen",
+          "action": { "showMessage": { "text": "The ring holds the path like a remembered song.", "duration": 3 } }
+        }
       }
     },
     {
@@ -79,14 +91,24 @@
       "tag": "memory_marker",
       "components": {
         "Transform": { "position": [690, 292] },
-        "Rect": { "width": 34, "height": 48, "color": "#6c7481" }
+        "Rect": { "width": 34, "height": 48, "color": "#6c7481" },
+        "BoxCollider": { "width": 34, "height": 48 },
+        "Solid": { "enabled": true }
       }
     },
     {
       "tag": "memory_glow",
       "components": {
         "Transform": { "position": [707, 288] },
-        "Circle": { "radius": 8, "color": "#d8f1ff" }
+        "Circle": { "radius": 8, "color": "#d8f1ff" },
+        "ParticleEmitter": {
+          "color": "#d8f1ff",
+          "rate": 0,
+          "lifetime": 0.5,
+          "speed": 46,
+          "spread": 6.28,
+          "radius": 2
+        }
       }
     },
     {
@@ -96,6 +118,31 @@
           "bounds": [280, 220, 240, 140],
           "oneShot": true,
           "action": { "showMessage": { "text": "Lanterns mark the safe ground. The trail can grow from here.", "duration": 4 } }
+        }
+      }
+    },
+    {
+      "tag": "west_portal",
+      "components": {
+        "Portal": {
+          "bounds": [0, 210, 36, 124],
+          "scene": "crossroads",
+          "spawn": "from_clearing"
+        }
+      }
+    },
+    {
+      "tag": "slime_encounter",
+      "components": {
+        "Interactable": {
+          "bounds": [650, 250, 100, 120],
+          "prompt": "Touch memory",
+          "repeatable": false,
+          "actions": [
+            { "setFlag": { "name": "memory_touched", "value": true } },
+            { "showMessage": { "text": "The memory stirs.", "duration": 1.2 } },
+            { "startCombat": { "encounter": "slime_duo" } }
+          ]
         }
       }
     }

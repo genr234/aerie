@@ -11,5 +11,6 @@
   "scripts": [
     { "name": "main", "path": "assets/scripts/main.wren" }
   ],
+  "combat": { "path": "assets/combat/combat.json" },
   "window": { "width": 800, "height": 450, "title": "Lantern Trail" }
 }
