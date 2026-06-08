@@ -17,7 +17,18 @@ Aerie projects are folders with a `game.json` manifest.
 }
 ```
 
-Scenes live under `assets/scenes/` and contain entities with components such as `Transform`, `Sprite`, `Camera`, `PlayerController`, `Solid`, `BoxCollider`, `Tilemap`, `Animation`, `ParticleEmitter`, `Tween`, `Trigger`, `Interactable`, `Portal`, and `SpawnPoint`.
+Audio is optional. Omit `audio` entirely for a silent project. Features such as `Portal` and `Interactable` never require audio assets; sound cues only play when a matching id is declared and loaded. When present, paths are resolved relative to `assets/`.
+
+```json
+{
+  "audio": {
+    "sounds": [{ "id": "interact", "path": "audio/interact.wav" }],
+    "music": [{ "id": "ambient", "path": "audio/ambient.ogg" }]
+  }
+}
+```
+
+Scenes live under `assets/scenes/` and contain entities with components such as `Transform`, `Sprite`, `Layer`, `Camera`, `PlayerController`, `Solid`, `BoxCollider`, `Tilemap`, `Animation`, `ParticleEmitter`, `Tween`, `Trigger`, `Interactable`, `Portal`, and `SpawnPoint`.
 
 Gameplay-oriented components are intentionally small and data-first:
 
@@ -29,6 +40,16 @@ Gameplay-oriented components are intentionally small and data-first:
     "Rect": { "width": 80, "height": 24, "color": "#53606a" },
     "Solid": { "enabled": true }
   }
+}
+```
+
+Add `Layer` to opt into explicit render ordering. Scenes without any `Layer` component keep the legacy component-order renderer. Once a scene uses `Layer`, renderable entities are sorted by `order`; entities with `ySort` enabled are ordered by their lower screen position within the same layer.
+
+```json
+{
+  "Transform": { "position": [96, 238] },
+  "Sprite": { "texture": "hero.png" },
+  "Layer": { "order": 20, "ySort": true }
 }
 ```
 
@@ -106,7 +127,9 @@ Dialogue assets live under `assets/dialogues/`. The v1 editor format is data-dri
 }
 ```
 
-Nodes and choices may include `when` conditions such as `flag_name`, `!flag_name`, or `score >= 2`. Supported actions are `setFlag`, `changeScene`, and `showMessage`.
+Nodes and choices may include `when` conditions such as `flag_name`, `!flag_name`, or `score >= 2`. Supported dialogue actions are `setFlag`, `changeScene`, and `showMessage`.
+
+Scene `Trigger` and `Interactable` actions also support `playSound`, `setEntityActive`, `startDialogue`, and `startCombat`, and may be grouped with `actions`.
 
 The editor may add optional layout metadata for the node graph:
 

@@ -21,6 +21,7 @@ class Game {
 Core APIs:
 
 - `Events.message(text, duration)` shows a temporary message.
+- `Events.playSound(id, volume, loop)`, `Events.playMusic(id, fade)`, and `Events.stopMusic(fade)` play audio declared in the optional `game.json` `audio` block. They are harmless no-ops in silent projects.
 - `State.setFlag/getFlag`, `State.setInt/getInt`, `State.setFloat/getFloat`, and `State.setString/getString` store story state.
 - `Scene.go(name)`, `Scene.currentIndex()`, and `Scene.findIndex(name)` control scenes.
 - `Entity.exists`, `Entity.getPosition`, `Entity.setPosition`, `Entity.move`, and `Entity.despawn` manipulate tagged entities.
@@ -29,6 +30,7 @@ Core APIs:
 - `CameraFx.shake(intensity, duration)` shakes the active camera.
 - `UI.text`, `UI.button`, `UI.panel`, and `UI.bar` draw simple UI.
 - `Save.write(slot)`, `Save.load(slot)`, `Save.exists(slot)`, and `Save.clear(slot)` persist v1 JSON saves under `saves/`.
+- Players can also press `Esc` in-game to open the built-in save menu for `slot1`.
 - `Combat.start(encounter)`, `Combat.isActive()`, `Combat.state()`, `Combat.actorHp(actor)`, and `Combat.actorMp(actor)` run turn-based battles from the declared combat asset.
 - `Inventory.add/count/has`, `Quest.start/complete/isActive/isComplete`, and `Combat.setHp/damage/heal/hp` provide save-backed gameplay helpers.
 
