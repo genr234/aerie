@@ -119,6 +119,20 @@ function validateProject(vfs: Vfs, project: ProjectConfig): Diagnostic[] {
       out.push(...parseCombat(vfs, project.combat.path).diagnostics);
     }
   }
+  for (const asset of [...(project.audio?.sounds ?? []), ...(project.audio?.music ?? [])]) {
+    if (!asset.id) out.push({ severity: 'error', path: 'game.json', message: 'Audio asset is missing id' });
+    if (!asset.path) {
+      out.push({ severity: 'error', path: 'game.json', message: `Audio asset '${asset.id || 'unknown'}' is missing path` });
+      continue;
+    }
+    const assetPath = asset.path.startsWith('assets/') ? asset.path : `assets/${asset.path}`;
+    if (!vfs.has(normalizePath(assetPath))) {
+      out.push({ severity: 'error', path: assetPath, message: `Missing audio asset '${asset.id || asset.path}'` });
+    }
+  }
+  const audioIds = new Set([...(project.audio?.sounds ?? []), ...(project.audio?.music ?? [])].map((asset) => asset.id).filter(Boolean));
+  const combatDoc = project.combat?.path ? parseCombat(vfs, project.combat.path).combat : undefined;
+  const encounterIds = new Set((combatDoc?.encounters ?? []).map((encounter) => encounter.id).filter(Boolean));
   const entryModule = project.entry?.module ?? 'main';
   const entryClass = project.entry?.class ?? 'Game';
   const entryScript = (project.scripts ?? []).find((script) => script.name === entryModule);
@@ -132,10 +146,32 @@ function validateProject(vfs: Vfs, project: ProjectConfig): Diagnostic[] {
   }
 
   const sceneTargets = new Set(scenes.map((scene) => scene.name));
+  const referencedEncounters = new Set<string>();
+  let hasEnding = false;
   for (const scene of scenes) {
     const parsed = parseScene(vfs, scene.path);
     if (!parsed.scene) continue;
-    for (const diagnostic of validateSceneReferences(vfs, scene.path, parsed.scene, sceneTargets, scenes)) out.push(diagnostic);
+    for (const diagnostic of validateSceneReferences(vfs, scene.path, parsed.scene, sceneTargets, scenes, audioIds, encounterIds)) out.push(diagnostic);
+    for (const entity of parsed.scene.entities ?? []) {
+      for (const ref of actionCombatRefs(entity.components?.Trigger)) referencedEncounters.add(ref.encounter);
+      for (const ref of actionCombatRefs(entity.components?.Interactable)) referencedEncounters.add(ref.encounter);
+      if (entity.tag?.toLowerCase().includes('ending')) hasEnding = true;
+      if (actionsSetFlag(entity.components?.Trigger, ['ending_reached', 'game_complete'])) hasEnding = true;
+      if (actionsSetFlag(entity.components?.Interactable, ['ending_reached', 'game_complete'])) hasEnding = true;
+    }
+  }
+  for (const script of project.scripts ?? []) {
+    const source = readText(vfs, script.path) ?? '';
+    for (const id of encounterIds) {
+      if (source.includes(id)) referencedEncounters.add(id);
+    }
+    if (/ending_reached|game_complete/.test(source)) hasEnding = true;
+  }
+  for (const id of encounterIds) {
+    if (!referencedEncounters.has(id)) out.push({ severity: 'warning', path: project.combat?.path ?? 'game.json', message: `Combat encounter '${id}' is not started by any scene action or script` });
+  }
+  if (scenes.length > 0 && !hasEnding) {
+    out.push({ severity: 'warning', path: 'game.json', message: "Project has no obvious ending action; add an Ending preset or set 'ending_reached'" });
   }
   out.push(...validateUnusedAssets(vfs, scenes));
 
@@ -210,6 +246,9 @@ function validateScene(path: string, scene: SceneDocument): Diagnostic[] {
       out.push({ severity: 'error', path, message: `entities[${index}].components must be an object` });
       continue;
     }
+    if (entity.components.PlayerController && !entity.components.BoxCollider) {
+      out.push({ severity: 'warning', path, message: `entities[${index}] has PlayerController but no BoxCollider` });
+    }
     for (const component of Object.keys(entity.components)) {
       if (!COMPONENTS.includes(component)) {
         out.push({ severity: 'warning', path, message: `entities[${index}] has unknown component '${component}'` });
@@ -222,7 +261,7 @@ function validateScene(path: string, scene: SceneDocument): Diagnostic[] {
   return out;
 }
 
-function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, sceneTargets: Set<string>, scenes: Array<{ name: string; path: string }>): Diagnostic[] {
+function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, sceneTargets: Set<string>, scenes: Array<{ name: string; path: string }>, audioIds: Set<string>, encounterIds: Set<string>): Diagnostic[] {
   const out: Diagnostic[] = [];
   const tags = new Set((scene.entities ?? []).map((entity) => entity.tag).filter(Boolean));
   const spawnPoints = new Set<string>();
@@ -252,6 +291,16 @@ function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, s
     for (const ref of actionSceneRefs(entity.components?.Interactable)) {
       if (ref.scene && !sceneTargets.has(ref.scene)) {
         out.push({ severity: 'error', path, message: `entities[${index}].Interactable targets missing scene '${ref.scene}'` });
+      }
+    }
+    for (const ref of [...actionAudioRefs(entity.components?.Trigger), ...actionAudioRefs(entity.components?.Interactable)]) {
+      if (ref.id && audioIds.size > 0 && !audioIds.has(ref.id)) {
+        out.push({ severity: 'warning', path, message: `entities[${index}] references undeclared audio '${ref.id}'` });
+      }
+    }
+    for (const ref of [...actionCombatRefs(entity.components?.Trigger), ...actionCombatRefs(entity.components?.Interactable)]) {
+      if (ref.encounter && encounterIds.size > 0 && !encounterIds.has(ref.encounter)) {
+        out.push({ severity: 'error', path, message: `entities[${index}] starts missing encounter '${ref.encounter}'` });
       }
     }
 
@@ -331,6 +380,12 @@ function validateComponentShape(path: string, index: number, components: Record<
   const circle = record(components.Circle);
   if (circle && (!num(circle.radius) || !validColor(circle.color))) {
     out.push({ severity: 'error', path, message: `entities[${index}].Circle needs numeric radius and string color` });
+  }
+
+  const layer = record(components.Layer);
+  if (layer) {
+    if (layer.order !== undefined && !num(layer.order)) out.push({ severity: 'error', path, message: `entities[${index}].Layer.order must be a number` });
+    if (layer.ySort !== undefined && typeof layer.ySort !== 'boolean') out.push({ severity: 'error', path, message: `entities[${index}].Layer.ySort must be a boolean` });
   }
 
   const sprite = record(components.Sprite);
@@ -453,6 +508,13 @@ function validTriggerAction(value: unknown): boolean {
   if (setFlag) return typeof setFlag.name === 'string' && (setFlag.value === undefined || typeof setFlag.value === 'boolean');
   const startCombat = record(action.startCombat);
   if (startCombat) return typeof startCombat.encounter === 'string';
+  const playSound = record(action.playSound);
+  if (playSound) return typeof playSound.id === 'string'
+    && (playSound.volume === undefined || num(playSound.volume))
+    && (playSound.loop === undefined || typeof playSound.loop === 'boolean');
+  const setEntityActive = record(action.setEntityActive);
+  if (setEntityActive) return typeof setEntityActive.tag === 'string'
+    && (setEntityActive.active === undefined || typeof setEntityActive.active === 'boolean');
   return false;
 }
 
@@ -470,6 +532,41 @@ function actionSceneRefsFromAction(value: unknown): Array<{ scene?: string }> {
   const changeScene = record(action.changeScene);
   if (typeof changeScene?.name === 'string') return [{ scene: changeScene.name }];
   return [];
+}
+
+function actionAudioRefs(component: unknown): Array<{ id: string }> {
+  return actionsFromCarrier(component).flatMap((action) => {
+    const playSound = record(record(action)?.playSound);
+    return typeof playSound?.id === 'string' ? [{ id: playSound.id }] : [];
+  });
+}
+
+function actionCombatRefs(component: unknown): Array<{ encounter: string }> {
+  return actionsFromCarrier(component).flatMap((action) => {
+    const startCombat = record(record(action)?.startCombat);
+    return typeof startCombat?.encounter === 'string' ? [{ encounter: startCombat.encounter }] : [];
+  });
+}
+
+function actionsSetFlag(component: unknown, names: string[]): boolean {
+  return actionsFromCarrier(component).some((action) => {
+    const setFlag = record(record(action)?.setFlag);
+    return typeof setFlag?.name === 'string' && names.includes(setFlag.name);
+  });
+}
+
+function actionsFromCarrier(component: unknown): unknown[] {
+  const carrier = record(component);
+  if (!carrier) return [];
+  const raw = Array.isArray(carrier.actions) ? carrier.actions : [carrier.action];
+  return raw.flatMap(flattenAction);
+}
+
+function flattenAction(value: unknown): unknown[] {
+  const action = record(value);
+  if (!action) return [];
+  if (Array.isArray(action.actions)) return action.actions.flatMap(flattenAction);
+  return [action];
 }
 
 function spawnPointExists(vfs: Vfs, sceneTargets: Set<string>, scenes: Array<{ name: string; path: string }>, sceneName: unknown, spawnName: string): boolean {

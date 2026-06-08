@@ -17,12 +17,21 @@ import { writeScene } from './project';
       "assets/reference-game/player.png",
       fileFromBytes("assets/reference-game/player.png", playerBytes),
     );
+    for (const audioPath of ["interact.wav", "portal.wav", "ambient.ogg"]) {
+      const bytes = new Uint8Array(
+        await (
+          await fetch(`/reference/assets/audio/${audioPath}`)
+        ).arrayBuffer(),
+      );
+      next.set(`assets/audio/${audioPath}`, fileFromBytes(`assets/audio/${audioPath}`, bytes));
+    }
     const scenes =
       template === "two-room"
         ? twoRoomScenes()
         : template === "tiny" || template === "choice"
           ? tinyStoryScenes()
           : blankScenes();
+    applyRenderLayers(scenes);
     const dialogues =
       template === "choice"
         ? [choiceDialogue()]
@@ -45,6 +54,13 @@ import { writeScene } from './project';
         path: `assets/dialogues/${dialogue.id}.json`,
       })),
       combat: { path: "assets/combat/combat.json" },
+      audio: {
+        sounds: [
+          { id: "interact", path: "audio/interact.wav" },
+          { id: "portal", path: "audio/portal.wav" },
+        ],
+        music: [{ id: "ambient", path: "audio/ambient.ogg" }],
+      },
       window: { width: 800, height: 450, title },
     };
     next = writeText(
@@ -81,6 +97,28 @@ import { writeScene } from './project';
             : blankScript(),
     );
     return next;
+  }
+
+  function applyRenderLayers(scenes: SceneDocument[]): void {
+    for (const scene of scenes) {
+      for (const entity of scene.entities) {
+        const layer = defaultLayerFor(entity);
+        if (layer) entity.components.Layer = layer;
+      }
+    }
+  }
+
+  function defaultLayerFor(entity: SceneDocument["entities"][number]): { order: number; ySort: boolean } | undefined {
+    const components = entity.components ?? {};
+    if (!components.Transform) return undefined;
+    if (!components.Sprite && !components.Rect && !components.Circle && !components.Tilemap && !components.ParticleEmitter) return undefined;
+    const tag = entity.tag ?? "";
+    if (tag.includes("camera")) return undefined;
+    if (tag.includes("bank") || tag === "grass" || tag === "tree_line" || tag.includes("path") || tag === "lit_floor" || tag === "ground" || tag === "trail") return { order: -20, ySort: false };
+    if (tag.includes("pool") || tag.includes("light") || tag.includes("core") || tag.includes("glow")) return { order: 30, ySort: false };
+    if (tag === "player") return { order: 20, ySort: true };
+    if (components.Rect || components.Sprite || components.Circle) return { order: 10, ySort: true };
+    return { order: 0, ySort: false };
   }
 
   export function tinyStoryScenes(): SceneDocument[] {
@@ -238,6 +276,22 @@ import { writeScene } from './project';
               },
             },
           },
+          {
+            tag: "trail_ending",
+            components: {
+              Transform: { position: [356, 164] },
+              Rect: { width: 116, height: 48, color: "#f0d77a" },
+              Trigger: {
+                bounds: [340, 150, 148, 84],
+                oneShot: true,
+                actions: [
+                  { playSound: { id: "portal", volume: 0.8 } },
+                  { setFlag: { name: "ending_reached", value: true } },
+                  { showMessage: { text: "The lantern trail is awake. Ending reached.", duration: 5 } },
+                ],
+              },
+            },
+          },
         ],
       },
     ];
@@ -310,6 +364,22 @@ import { writeScene } from './project';
                 bounds: [500, 150, 90, 130],
                 oneShot: true,
                 action: { startCombat: { encounter: "slime_duo" } },
+              },
+            },
+          },
+          {
+            tag: "ending",
+            components: {
+              Transform: { position: [660, 232] },
+              Rect: { width: 92, height: 54, color: "#f0d77a" },
+              Trigger: {
+                bounds: [640, 210, 124, 96],
+                oneShot: true,
+                actions: [
+                  { playSound: { id: "portal", volume: 0.8 } },
+                  { setFlag: { name: "ending_reached", value: true } },
+                  { showMessage: { text: "Ending reached.", duration: 4 } },
+                ],
               },
             },
           },
@@ -457,13 +527,16 @@ class Game {
   static onBoot() {
     State.set("stone_touched", false)
     State.set("crossroads_done", false)
+    Events.playMusic("ambient", 0.8)
     Events.message("Follow the amber markers to wake the waystone.", 4)
   }
 
   static onUpdate(dt) {
     if (State.getFlag("stone_touched") && !State.getFlag("crossroads_done")) {
       State.set("crossroads_done", true)
+      Events.playSound("interact", 0.8, false)
       Events.message("The waystone hums. A lantern gate opens east.", 4)
+      Events.playSound("portal", 0.7, false)
       Scene.go("clearing")
     }
   }
@@ -471,7 +544,8 @@ class Game {
   static onDraw() {
     var place = Scene.currentIndex() == Scene.findIndex("clearing") ? "Clearing" : "Crossroads"
     var touched = State.getFlag("stone_touched") ? "awake" : "sleeping"
-    UI.text(18, 18, "%(place) | waystone: %(touched)")
+    var ending = State.getFlag("ending_reached") ? "complete" : "open trail"
+    UI.text(18, 18, "%(place) | waystone: %(touched) | %(ending)")
   }
 }
 `;
@@ -483,11 +557,13 @@ class Game {
 class Game {
   static onBoot() {
     State.set("stone_touched", false)
+    Events.playMusic("ambient", 0.8)
     Events.message("This template includes assets/dialogues/stone_choice.json.", 4)
   }
 
   static onUpdate(dt) {
     if (State.getFlag("stone_touched")) {
+      Events.playSound("portal", 0.7, false)
       Events.message("Choice outcome: the path opens.", 2)
       State.set("stone_touched", false)
       Scene.go("clearing")
@@ -507,6 +583,7 @@ class Game {
 class Game {
   static onBoot() {
     if (Save.exists("slot1")) Save.load("slot1")
+    Events.playMusic("ambient", 0.8)
     Events.message("Cross edge triggers to move between rooms. Press save from your script with Save.write(\"slot1\").", 4)
   }
 
@@ -514,7 +591,8 @@ class Game {
 
   static onDraw() {
     var place = Scene.currentIndex() == Scene.findIndex("clearing") ? "Clearing" : "Crossroads"
-    UI.text(18, 18, "Two-Room Adventure | %(place)")
+    var ending = State.getFlag("ending_reached") ? "complete" : "find the ending"
+    UI.text(18, 18, "Two-Room Adventure | %(place) | %(ending)")
   }
 }
 `;
@@ -526,6 +604,7 @@ import "engine/api" for Inventory, Quest, Combat, Entity, CameraFx
 
 class Game {
   static onBoot() {
+    Events.playMusic("ambient", 0.8)
     Events.message("Your story starts here.", 3)
     Inventory.add("spark", 1)
     Quest.start("first_steps")
@@ -535,6 +614,7 @@ class Game {
   static onUpdate(dt) {
     if (Inventory.has("spark", 1) && !Quest.isComplete("first_steps")) {
       Combat.damage("signal", 1)
+      Events.playSound("interact", 0.8, false)
       Entity.emitParticles("signal_light", 8)
       CameraFx.shake(3, 0.15)
       Quest.complete("first_steps")
@@ -543,7 +623,8 @@ class Game {
 
   static onDraw() {
     var hp = Combat.hp("signal")
-    UI.text(18, 18, "Start | signal hp: %(hp)")
+    var ending = State.getFlag("ending_reached") ? "complete" : "find the ending"
+    UI.text(18, 18, "Start | signal hp: %(hp) | %(ending)")
   }
 }
 `;

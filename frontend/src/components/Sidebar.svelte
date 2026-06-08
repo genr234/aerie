@@ -1,13 +1,29 @@
 <script lang="ts">
-  import { Plus, FolderOpen, Folder, File, FileCode, FileJson, Image, ChevronRight } from "@lucide/svelte";
   import {
-    project, showCreateScene, showCreateScript, showCreateDialogue,
-    selectedPath, dirty, sceneDecls, scriptDecls, dialogueDecls, combatDecl,
-    paths
+    Plus,
+    FolderOpen,
+    Folder,
+    File,
+    FileCode,
+    FileJson,
+    Image,
+    ChevronRight,
+  } from "@lucide/svelte";
+  import {
+    project,
+    showCreateScene,
+    showCreateScript,
+    showCreateDialogue,
+    selectedPath,
+    dirty,
+    sceneDecls,
+    scriptDecls,
+    dialogueDecls,
+    combatDecl,
+    paths,
   } from "../lib/stores";
   import { selectScene, selectFile, selectCombat } from "../lib/actions";
 
-  // ---- Tree types ----
   interface TreeNode {
     name: string;
     path: string;
@@ -16,7 +32,6 @@
     depth: number;
   }
 
-  // ---- Build tree from flat paths ----
   function buildTree(sortedPaths: string[]): TreeNode[] {
     const root: TreeNode[] = [];
     const folderMap = new Map<string, TreeNode>();
@@ -32,11 +47,23 @@
         const isLast = i === parts.length - 1;
 
         if (isLast) {
-          siblings.push({ name: part, path, isFolder: false, children: [], depth: i });
+          siblings.push({
+            name: part,
+            path,
+            isFolder: false,
+            children: [],
+            depth: i,
+          });
         } else {
           let folder = folderMap.get(currentPath);
           if (!folder) {
-            folder = { name: part, path: currentPath, isFolder: true, children: [], depth: i };
+            folder = {
+              name: part,
+              path: currentPath,
+              isFolder: true,
+              children: [],
+              depth: i,
+            };
             folderMap.set(currentPath, folder);
             siblings.push(folder);
           }
@@ -61,7 +88,6 @@
 
   $: tree = buildTree($paths);
 
-  // ---- Expand / collapse state ----
   let expandedFolders: Set<string> = new Set(["assets"]);
 
   function toggleFolder(path: string) {
@@ -89,7 +115,6 @@
     if (changed) expandedFolders = next;
   }
 
-  // ---- Flatten tree to visible rows ----
   function flattenTree(nodes: TreeNode[], expanded: Set<string>): TreeNode[] {
     const result: TreeNode[] = [];
     for (const node of nodes) {
@@ -103,7 +128,6 @@
 
   $: flatRows = flattenTree(tree, expandedFolders);
 
-  // ---- Icon per file type ----
   function rowIcon(node: TreeNode): typeof Folder {
     if (node.isFolder) {
       return expandedFolders.has(node.path) ? FolderOpen : Folder;
@@ -114,7 +138,6 @@
     return File;
   }
 
-  // ---- Click handler ----
   function handleRowClick(node: TreeNode) {
     if (node.isFolder) {
       toggleFolder(node.path);
@@ -149,17 +172,30 @@
   <div class="sidebar-toolbar">
     <span class="sidebar-title">Explorer</span>
     <div class="sidebar-actions">
-      <button class="tool-button" on:click={() => ($showCreateScene = true)} disabled={!canCreate()} title="New scene"><Plus size={14} /><span>Scene</span></button>
-      <button class="tool-button" on:click={() => ($showCreateScript = true)} disabled={!canCreate()} title="New script"><Plus size={14} /><span>Script</span></button>
-      <button class="tool-button" on:click={() => ($showCreateDialogue = true)} disabled={!canCreate()} title="New dialogue"><Plus size={14} /><span>Dialogue</span></button>
+      <button
+        class="tool-button"
+        on:click={() => ($showCreateScene = true)}
+        disabled={!canCreate()}
+        title="New scene"><Plus size={14} /><span>Scene</span></button
+      >
+      <button
+        class="tool-button"
+        on:click={() => ($showCreateScript = true)}
+        disabled={!canCreate()}
+        title="New script"><Plus size={14} /><span>Script</span></button
+      >
+      <button
+        class="tool-button"
+        on:click={() => ($showCreateDialogue = true)}
+        disabled={!canCreate()}
+        title="New dialogue"><Plus size={14} /><span>Dialogue</span></button
+      >
     </div>
   </div>
 
   <div class="file-tree">
     {#if flatRows.length > 0}
       {#each flatRows as node (node.path)}
-        {@const Icon = rowIcon(node)}
-        {@const isExpanded = node.isFolder && expandedFolders.has(node.path)}
         <button
           class="tree-row"
           class:active={$selectedPath === node.path}
@@ -168,18 +204,28 @@
           on:click={() => handleRowClick(node)}
         >
           {#if node.isFolder}
-            <span class="tree-chevron" class:expanded={isExpanded}><ChevronRight size={14} /></span>
+            <span
+              class="tree-chevron"
+              class:expanded={node.isFolder && expandedFolders.has(node.path)}
+              ><ChevronRight size={14} /></span
+            >
           {:else}
             <span class="tree-chevron tree-chevron-spacer"></span>
           {/if}
-          <span class="tree-icon"><Icon size={16} /></span>
-          <span class="tree-name">{$dirty.has(node.path) ? "• " : ""}{node.name}</span>
+          <span class="tree-icon"
+            ><svelte:component this={rowIcon(node)} size={16} /></span
+          >
+          <span class="tree-name"
+            >{$dirty.has(node.path) ? "• " : ""}{node.name}</span
+          >
         </button>
       {/each}
     {:else}
       <div class="tree-empty">
         <p>No files yet.</p>
-        <p class="hint">Load the reference project or open a folder to begin.</p>
+        <p class="hint">
+          Load the reference project or open a folder to begin.
+        </p>
       </div>
     {/if}
   </div>

@@ -33,6 +33,12 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     create: () => ({ width: 64, height: 48, color: "#ffffff" }),
   },
   {
+    name: "Layer",
+    category: "Rendering",
+    description: "Opt into ordered rendering and optional y-sort.",
+    create: () => ({ order: 0, ySort: false }),
+  },
+  {
     name: "Camera",
     category: "Core",
     description: "2D camera with follow, smoothing, and bounds clamp.",

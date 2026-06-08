@@ -20,6 +20,7 @@ import {
   writeScene, writeDialogue, parseCombat, writeCombat
 } from './project';
 import { defaultComponent } from './componentRegistry';
+import { moveEntityPositions, nextSelectionAfterDelete, selectedEntities, setEntityEditorPosition, snapPoint, type EntityPreset } from './sceneEditor';
 import {
   deleteDialogueNodeAndClearLinks,
   duplicateDialogueNode as duplicateDialogueNodeInDocument,
@@ -511,7 +512,7 @@ export function updateSceneField(path: string, field: string, value: any) {
   });
 }
 
-export type EntityPreset = "player" | "wall" | "trigger" | "enemy" | "camera";
+export type SceneAlignMode = "left" | "right" | "top" | "bottom" | "centerX" | "centerY" | "distributeX" | "distributeY";
 
 export function addEntityPreset(path: string, preset: EntityPreset) {
   const parsed = parseScene(get(vfs), path).scene;
@@ -520,6 +521,7 @@ export function addEntityPreset(path: string, preset: EntityPreset) {
     Math.round((parsed.size?.width ?? 800) / 2 - 24),
     Math.round((parsed.size?.height ?? 450) / 2 - 24),
   ];
+  if (addSpecialPreset(path, preset, center)) return;
   let createdIndex = -1;
   mutateScene(path, (scene) => {
     const used = new Set((scene.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
@@ -528,6 +530,48 @@ export function addEntityPreset(path: string, preset: EntityPreset) {
     createdIndex = scene.entities.length - 1;
   });
   if (createdIndex >= 0) {
+    selectedEntities.set({ scenePath: path, indices: [createdIndex] });
+    selection.set({ type: "entity", scenePath: path, entityIndex: createdIndex });
+  }
+}
+
+export function addEntityAt(path: string, position: [number, number]) {
+  const parsed = parseScene(get(vfs), path).scene;
+  if (!parsed) return;
+  const used = new Set((parsed.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+  let createdIndex = -1;
+  mutateScene(path, (scene) => {
+    scene.entities = [...(scene.entities ?? []), {
+      tag: uniqueId("entity", used),
+      components: {
+        Transform: { position, scale: [1, 1], rotation: 0 },
+        Rect: { width: 64, height: 48, color: "#5b7fdb" },
+      },
+    }];
+    createdIndex = scene.entities.length - 1;
+  });
+  if (createdIndex >= 0) {
+    selectedEntities.set({ scenePath: path, indices: [createdIndex] });
+    selection.set({ type: "entity", scenePath: path, entityIndex: createdIndex });
+  }
+}
+
+export function addEntityPresetAt(path: string, preset: EntityPreset, position: [number, number]) {
+  const parsed = parseScene(get(vfs), path).scene;
+  if (!parsed) return;
+  if (addSpecialPreset(path, preset, position)) return;
+  const used = new Set((parsed.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+  let createdIndex = -1;
+  mutateScene(path, (scene) => {
+    const entity = presetEntity(preset, position, used);
+    if (preset === "camera") {
+      (entity.components.Transform as Record<string, unknown>).position = position;
+    }
+    scene.entities = [...(scene.entities ?? []), entity];
+    createdIndex = scene.entities.length - 1;
+  });
+  if (createdIndex >= 0) {
+    selectedEntities.set({ scenePath: path, indices: [createdIndex] });
     selection.set({ type: "entity", scenePath: path, entityIndex: createdIndex });
   }
 }
@@ -576,6 +620,244 @@ export function deleteEntity() {
     scene.entities.splice(current.entityIndex, 1);
     selection.set({ type: "file", path: current.scenePath });
   });
+}
+
+export function deleteEntities(path: string, indices: number[]) {
+  const selected = Array.from(new Set(indices)).sort((a, b) => b - a);
+  if (selected.length === 0) return [];
+  let nextSelection: number[] = [];
+  mutateScene(path, (scene) => {
+    const selectedAsc = [...selected].reverse();
+    nextSelection = selectedAsc.reduce(
+      (current, deleted) => nextSelectionAfterDelete(current, deleted, scene.entities.length),
+      selectedAsc,
+    );
+    for (const index of selected) {
+      scene.entities.splice(index, 1);
+    }
+  });
+  if (nextSelection.length > 0) {
+    selectedEntities.set({ scenePath: path, indices: nextSelection });
+    selection.set({ type: "entity", scenePath: path, entityIndex: nextSelection[0] });
+  } else {
+    selectedEntities.set(undefined);
+    selection.set({ type: "file", path });
+  }
+  return nextSelection;
+}
+
+export function duplicateEntities(path: string, indices: number[]) {
+  const selected = Array.from(new Set(indices)).sort((a, b) => a - b);
+  if (selected.length === 0) return [];
+  let created: number[] = [];
+  mutateScene(path, (scene) => {
+    const clones = selected.map((index) => structuredClone(scene.entities[index])).filter(Boolean);
+    scene.entities.push(...clones);
+    created = clones.map((_, offset) => scene.entities.length - clones.length + offset);
+  });
+  if (created.length > 0) {
+    selectedEntities.set({ scenePath: path, indices: created });
+    selection.set({ type: "entity", scenePath: path, entityIndex: created[0] });
+  }
+  return created;
+}
+
+export function moveEntities(path: string, indices: number[], delta: [number, number], snapSize = 1, snap = false) {
+  const selected = Array.from(new Set(indices)).sort((a, b) => a - b);
+  if (selected.length === 0) return;
+  mutateScene(path, (scene) => {
+    moveEntityPositions(scene.entities, selected, delta, snapSize, snap);
+  });
+}
+
+export function alignEntities(path: string, indices: number[], mode: SceneAlignMode) {
+  const selected = Array.from(new Set(indices)).sort((a, b) => a - b);
+  if (selected.length < 2) return;
+  mutateScene(path, (scene) => {
+    const transforms = selected
+      .map((index) => ({ index, transform: scene.entities[index]?.components.Transform as Record<string, any> | undefined }))
+      .filter((item) => item.transform && Array.isArray(item.transform.position));
+    if (transforms.length < 2) return;
+    const positions = transforms.map((item) => item.transform!.position as number[]);
+    if (mode === "distributeX" || mode === "distributeY") {
+      const axis = mode === "distributeX" ? 0 : 1;
+      const sorted = transforms.sort((a, b) => Number(a.transform!.position[axis]) - Number(b.transform!.position[axis]));
+      const first = Number(sorted[0].transform!.position[axis]);
+      const last = Number(sorted[sorted.length - 1].transform!.position[axis]);
+      const step = sorted.length > 1 ? (last - first) / (sorted.length - 1) : 0;
+      sorted.forEach((item, offset) => {
+        item.transform!.position[axis] = Math.round(first + step * offset);
+      });
+      return;
+    }
+    const target = mode === "left" ? Math.min(...positions.map((p) => Number(p[0])))
+      : mode === "right" ? Math.max(...positions.map((p) => Number(p[0])))
+      : mode === "top" ? Math.min(...positions.map((p) => Number(p[1])))
+      : mode === "bottom" ? Math.max(...positions.map((p) => Number(p[1])))
+      : mode === "centerX" ? Math.round(positions.reduce((sum, p) => sum + Number(p[0]), 0) / positions.length)
+      : Math.round(positions.reduce((sum, p) => sum + Number(p[1]), 0) / positions.length);
+    const axis = mode === "left" || mode === "right" || mode === "centerX" ? 0 : 1;
+    for (const item of transforms) item.transform!.position[axis] = target;
+  });
+}
+
+export function setEntitiesPosition(path: string, indices: number[], positions: Map<number, [number, number]>, snapSize = 1, snap = false) {
+  const selected = Array.from(new Set(indices)).sort((a, b) => a - b);
+  if (selected.length === 0) return;
+  mutateScene(path, (scene) => {
+    for (const index of selected) {
+      const entity = scene.entities[index];
+      const position = positions.get(index);
+      if (!entity || !position) continue;
+      setEntityEditorPosition(entity, snapPoint(position, snapSize, snap));
+    }
+  });
+}
+
+function addSpecialPreset(path: string, preset: EntityPreset, position: [number, number]): boolean {
+  if (preset === "portal") {
+    addPortalPair(path, position);
+    return true;
+  }
+  if (preset === "npc") {
+    addNpcWithDialogue(path, position);
+    return true;
+  }
+  return false;
+}
+
+function addPortalPair(path: string, position: [number, number]) {
+  const currentVfs = get(vfs);
+  const currentProject = parseProject(currentVfs).project;
+  const sceneDecls = currentProject?.scenes ?? [];
+  const fromDecl = sceneDecls.find((scene) => scene.path === path);
+  const toDecl = sceneDecls.find((scene) => scene.path !== path) ?? fromDecl;
+  const fromScene = parseScene(currentVfs, path).scene;
+  const toScene = toDecl ? parseScene(currentVfs, toDecl.path).scene : undefined;
+  if (!fromDecl || !toDecl || !fromScene || !toScene) return;
+
+  const next = new Map(currentVfs);
+  const fromUsed = new Set((fromScene.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+  const toUsed = new Set((toScene.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+  const portalTag = uniqueId("portal", fromUsed);
+  const returnPortalTag = uniqueId("return_portal", toUsed);
+  const fromSpawnName = `from_${toDecl.name}`;
+  const toSpawnName = `from_${fromDecl.name}`;
+  const portalBounds: [number, number, number, number] = [position[0], position[1], 56, 96];
+  const returnPosition: [number, number] = [48, Math.round((toScene.size?.height ?? 450) / 2 - 48)];
+
+  fromScene.entities.push({
+    tag: portalTag,
+    components: {
+      Transform: { position, scale: [1, 1], rotation: 0 },
+      Rect: { width: 56, height: 96, color: "#315d68" },
+      Layer: { order: 10, ySort: true },
+      Portal: { bounds: portalBounds, scene: toDecl.name, spawn: toSpawnName },
+    },
+  });
+  if (!fromScene.entities.some((entity) => (entity.components.SpawnPoint as any)?.name === fromSpawnName)) {
+    fromScene.entities.push({
+      tag: uniqueId("spawn", fromUsed),
+      components: { Transform: { position: [position[0] - 64, position[1] + 40], scale: [1, 1], rotation: 0 }, SpawnPoint: { name: fromSpawnName } },
+    });
+  }
+
+  if (!toScene.entities.some((entity) => (entity.components.SpawnPoint as any)?.name === toSpawnName)) {
+    toScene.entities.push({
+      tag: uniqueId("spawn", toUsed),
+      components: { Transform: { position: [returnPosition[0] + 72, returnPosition[1] + 40], scale: [1, 1], rotation: 0 }, SpawnPoint: { name: toSpawnName } },
+    });
+  }
+  if (toDecl.path !== path) {
+    toScene.entities.push({
+      tag: returnPortalTag,
+      components: {
+        Transform: { position: returnPosition, scale: [1, 1], rotation: 0 },
+        Rect: { width: 56, height: 96, color: "#315d68" },
+        Layer: { order: 10, ySort: true },
+        Portal: { bounds: [returnPosition[0], returnPosition[1], 56, 96], scene: fromDecl.name, spawn: fromSpawnName },
+      },
+    });
+  }
+
+  recordHistory();
+  next.set(path, { path, kind: "text", text: writeScene(fromScene) });
+  if (toDecl.path !== path) next.set(toDecl.path, { path: toDecl.path, kind: "text", text: writeScene(toScene) });
+  vfs.set(next);
+  dirty.update((d) => new Set([...d, path, toDecl.path]));
+  rawText.set(readText(get(vfs), path) ?? "");
+  refreshProject();
+  const index = fromScene.entities.findIndex((entity) => entity.tag === portalTag);
+  if (index >= 0) {
+    selectedEntities.set({ scenePath: path, indices: [index] });
+    selection.set({ type: "entity", scenePath: path, entityIndex: index });
+  }
+  status.set(toDecl.path === path ? "Added portal." : `Added portal pair to ${toDecl.name}.`);
+}
+
+function addNpcWithDialogue(path: string, position: [number, number]) {
+  const currentVfs = get(vfs);
+  const currentProject = parseProject(currentVfs).project;
+  const scene = parseScene(currentVfs, path).scene;
+  if (!currentProject || !scene) return;
+
+  const used = new Set((scene.entities ?? []).map((entity) => entity.tag).filter(Boolean) as string[]);
+  const tag = uniqueId("npc", used);
+  const dialogueId = tag;
+  const dialoguePath = uniqueAssetPath(`assets/dialogues/${dialogueId}.json`, currentVfs);
+  const dialogue = {
+    id: dialogueId,
+    start: "hello",
+    nodes: [
+      { id: "hello", speaker: "Guide", text: "This place is almost awake.", next: "choice" },
+      {
+        id: "choice",
+        text: "What do you do?",
+        choices: [
+          { text: "Mark this place", next: "marked", actions: [{ setFlag: { name: `${dialogueId}_marked`, value: true } }] },
+          { text: "Leave", next: "bye" },
+        ],
+      },
+      { id: "marked", speaker: "Guide", text: "Good. Now the world can remember it." },
+      { id: "bye", speaker: "Guide", text: "Then keep walking." },
+    ],
+  };
+  scene.entities.push({
+    tag,
+    components: {
+      Transform: { position, scale: [1, 1], rotation: 0 },
+      Rect: { width: 34, height: 48, color: "#6c7481" },
+      Layer: { order: 20, ySort: true },
+      BoxCollider: { width: 28, height: 36, offset: [3, 12] },
+      Solid: { enabled: true },
+      Interactable: {
+        bounds: [position[0] - 18, position[1] - 14, 70, 78],
+        prompt: "Talk",
+        repeatable: true,
+        actions: [
+          { playSound: { id: "interact", volume: 0.7 } },
+          { startDialogue: { id: dialogueId, label: "hello" } },
+        ],
+      },
+    },
+  });
+
+  const nextProject = structuredClone(currentProject);
+  nextProject.dialogues = [...(nextProject.dialogues ?? []), { name: dialogueId, path: dialoguePath }];
+  recordHistory();
+  let next = writeText(currentVfs, path, writeScene(scene));
+  next = writeText(next, dialoguePath, writeDialogue(dialogue));
+  next = writeText(next, "game.json", `${JSON.stringify(cleanUndefined(nextProject), null, 2)}\n`);
+  vfs.set(next);
+  dirty.update((d) => new Set([...d, path, dialoguePath, "game.json"]));
+  rawText.set(readText(get(vfs), path) ?? "");
+  refreshProject();
+  const index = scene.entities.findIndex((entity) => entity.tag === tag);
+  if (index >= 0) {
+    selectedEntities.set({ scenePath: path, indices: [index] });
+    selection.set({ type: "entity", scenePath: path, entityIndex: index });
+  }
+  status.set("Added NPC and dialogue.");
 }
 
 export function updateEntityTag(tag: string) {
@@ -893,13 +1175,24 @@ export function mutateCombat(mutator: (combat: CombatDocument) => void) {
 
 function presetEntity(preset: EntityPreset, center: [number, number], used: Set<string>): SceneEntity {
   switch (preset) {
+    case "entity":
+      return {
+        tag: uniqueId("entity", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 64, height: 48, color: "#5b7fdb" },
+          Layer: { order: 10, ySort: true },
+        },
+      };
     case "player":
       return {
         tag: uniqueId("player", used),
         components: {
           Transform: { position: center, scale: [1, 1], rotation: 0 },
           Rect: { width: 32, height: 40, color: "#4aa382" },
+          Layer: { order: 20, ySort: true },
           PlayerController: { speed: 120 },
+          BoxCollider: { width: 18, height: 14, offset: [7, 24] },
           Solid: { enabled: true },
         },
       };
@@ -909,6 +1202,8 @@ function presetEntity(preset: EntityPreset, center: [number, number], used: Set<
         components: {
           Transform: { position: center, scale: [1, 1], rotation: 0 },
           Rect: { width: 96, height: 32, color: "#4f5964" },
+          Layer: { order: 10, ySort: true },
+          BoxCollider: { width: 96, height: 32 },
           Solid: { enabled: true },
         },
       };
@@ -917,7 +1212,14 @@ function presetEntity(preset: EntityPreset, center: [number, number], used: Set<
         tag: uniqueId("trigger", used),
         components: {
           Transform: { position: center, scale: [1, 1], rotation: 0 },
-          Trigger: { bounds: [center[0], center[1], 96, 64], oneShot: false, action: { showMessage: { text: "Hello", duration: 2 } } },
+          Trigger: {
+            bounds: [center[0], center[1], 96, 64],
+            oneShot: false,
+            actions: [
+              { playSound: { id: "interact", volume: 0.7 } },
+              { showMessage: { text: "Hello", duration: 2 } },
+            ],
+          },
         },
       };
     case "enemy":
@@ -926,8 +1228,18 @@ function presetEntity(preset: EntityPreset, center: [number, number], used: Set<
         components: {
           Transform: { position: center, scale: [1, 1], rotation: 0 },
           Rect: { width: 36, height: 36, color: "#b85d5d" },
+          Layer: { order: 20, ySort: true },
+          BoxCollider: { width: 32, height: 28, offset: [2, 8] },
           Solid: { enabled: true },
-          Trigger: { bounds: [center[0] - 12, center[1] - 12, 60, 60], oneShot: true, action: { startCombat: { encounter: "slime_duo" } } },
+          Interactable: {
+            bounds: [center[0] - 16, center[1] - 16, 68, 68],
+            prompt: "Engage",
+            repeatable: false,
+            actions: [
+              { playSound: { id: "interact", volume: 0.8 } },
+              { startCombat: { encounter: "slime_duo" } },
+            ],
+          },
         },
       };
     case "camera":
@@ -936,6 +1248,80 @@ function presetEntity(preset: EntityPreset, center: [number, number], used: Set<
         components: {
           Transform: { position: [0, 0], scale: [1, 1], rotation: 0 },
           Camera: { offset: [400, 225], zoom: 1 },
+        },
+      };
+    case "locked_gate": {
+      const tag = uniqueId("locked_gate", used);
+      return {
+        tag,
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 72, height: 104, color: "#315d68" },
+          Layer: { order: 10, ySort: true },
+          BoxCollider: { width: 72, height: 104 },
+          Solid: { enabled: true },
+          Interactable: {
+            bounds: [center[0] - 20, center[1] - 18, 112, 140],
+            prompt: "Check gate",
+            repeatable: true,
+            actions: [
+              { playSound: { id: "interact", volume: 0.6 } },
+              { setFlag: { name: `${tag}_checked`, value: true } },
+              { showMessage: { text: "The gate is locked. Something nearby may open it.", duration: 3 } },
+            ],
+          },
+        },
+      };
+    }
+    case "collectible": {
+      const tag = uniqueId("collectible", used);
+      return {
+        tag,
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Circle: { radius: 12, color: "#ffd56f" },
+          Layer: { order: 30, ySort: false },
+          ParticleEmitter: { color: "#ffd56f", rate: 2, lifetime: 0.55, speed: 18, spread: 6.28, radius: 2 },
+          Interactable: {
+            bounds: [center[0] - 18, center[1] - 18, 52, 52],
+            prompt: "Take",
+            repeatable: false,
+            actions: [
+              { playSound: { id: "interact", volume: 0.8 } },
+              { setFlag: { name: `${tag}_collected`, value: true } },
+              { showMessage: { text: "Collected.", duration: 1.5 } },
+              { setEntityActive: { tag, active: false } },
+            ],
+          },
+        },
+      };
+    }
+    case "ending":
+      return {
+        tag: uniqueId("ending", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 96, height: 72, color: "#f0d77a" },
+          Layer: { order: 10, ySort: true },
+          Trigger: {
+            bounds: [center[0], center[1], 96, 72],
+            oneShot: true,
+            actions: [
+              { playSound: { id: "portal", volume: 0.8 } },
+              { setFlag: { name: "ending_reached", value: true } },
+              { showMessage: { text: "Ending reached. The trail remembers you.", duration: 5 } },
+            ],
+          },
+        },
+      };
+    case "portal":
+    case "npc":
+      return {
+        tag: uniqueId("entity", used),
+        components: {
+          Transform: { position: center, scale: [1, 1], rotation: 0 },
+          Rect: { width: 64, height: 48, color: "#5b7fdb" },
+          Layer: { order: 10, ySort: true },
         },
       };
   }

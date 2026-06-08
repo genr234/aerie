@@ -19,6 +19,10 @@ export type ProjectConfig = {
   scripts?: Array<{ name: string; path: string }>;
   dialogues?: Array<{ name: string; path: string }>;
   combat?: { path: string };
+  audio?: {
+    sounds?: Array<{ id: string; path: string }>;
+    music?: Array<{ id: string; path: string }>;
+  };
   window?: { width?: number; height?: number; title?: string };
 };
 

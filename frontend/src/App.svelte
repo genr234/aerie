@@ -70,6 +70,7 @@
   <main
     class="editor-shell"
     class:inspector-collapsed={$inspectorCollapsed}
+    class:scene-shell={$activeMainTab === "scene"}
     on:pointermove={dragMove}
     on:pointerup={endDrag}
   >
@@ -100,9 +101,11 @@
       <BottomPanel collapsed={$panelCollapsed} on:toggleCollapse={togglePanel} />
     </section>
 
-    <Inspector
-      collapsed={$inspectorCollapsed}
-      on:toggleCollapse={toggleInspector}
-    />
+    {#if $activeMainTab !== "scene"}
+      <Inspector
+        collapsed={$inspectorCollapsed}
+        on:toggleCollapse={toggleInspector}
+      />
+    {/if}
   </main>
 {/if}
