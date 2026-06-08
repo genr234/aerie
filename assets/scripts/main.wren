@@ -10,12 +10,14 @@ class Game {
     State.set("memory_touched", false)
     State.set("memory_feedback", false)
     State.set("touch_count", 0)
+    Events.playMusic("ambient", 0.8)
     Events.message("Follow the amber markers. Press E near things that glow.", 4)
   }
 
   static onUpdate(dt) {
     if (State.getFlag("stone_touched") && !State.getFlag("stone_feedback")) {
       State.set("stone_feedback", true)
+      Events.playSound("interact", 0.8, false)
       Entity.emitParticles("waystone_core", 24)
       CameraFx.shake(4, 0.18)
     }
@@ -27,6 +29,7 @@ class Game {
 
     if (State.getFlag("memory_touched") && !State.getFlag("memory_feedback")) {
       State.set("memory_feedback", true)
+      Events.playSound("portal", 0.7, false)
       Entity.emitParticles("memory_glow", 20)
       CameraFx.shake(5, 0.2)
     }
@@ -46,6 +49,7 @@ class Game {
     var touched = State.getFlag("stone_touched") ? "awake" : "sleeping"
     var gate = State.getFlag("gate_open") ? "open" : "dim"
     var visits = State.get("touch_count")
-    UI.text(18, 18, "%(place) | waystone: %(touched) | east gate: %(gate) | awakenings: %(visits)")
+    var ending = State.getFlag("ending_reached") ? "complete" : "open trail"
+    UI.text(18, 18, "%(place) | waystone: %(touched) | east gate: %(gate) | awakenings: %(visits) | %(ending)")
   }
 }

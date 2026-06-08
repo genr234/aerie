@@ -12,5 +12,14 @@
     { "name": "main", "path": "assets/scripts/main.wren" }
   ],
   "combat": { "path": "assets/combat/combat.json" },
+  "audio": {
+    "sounds": [
+      { "id": "interact", "path": "audio/interact.wav" },
+      { "id": "portal", "path": "audio/portal.wav" }
+    ],
+    "music": [
+      { "id": "ambient", "path": "audio/ambient.ogg" }
+    ]
+  },
   "window": { "width": 800, "height": 450, "title": "Lantern Trail" }
 }

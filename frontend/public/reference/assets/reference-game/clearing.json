@@ -1,106 +1,282 @@
 {
   "name": "clearing",
   "type": "exploration",
-  "size": { "width": 800, "height": 450 },
-  "background": { "color": "#1b3034" },
+  "size": {
+    "width": 800,
+    "height": 450
+  },
+  "background": {
+    "color": "#1b3034"
+  },
   "entities": [
     {
       "tag": "main_camera",
       "components": {
-        "Transform": { "position": [0, 0] },
-        "Camera": { "offset": [400, 225], "zoom": 1.0, "smoothing": 12, "clampToScene": true, "followTag": "player" }
+        "Transform": {
+          "position": [
+            0,
+            0
+          ]
+        },
+        "Camera": {
+          "offset": [
+            400,
+            225
+          ],
+          "zoom": 1,
+          "smoothing": 12,
+          "clampToScene": true,
+          "followTag": "player"
+        }
       }
     },
     {
       "tag": "tree_line",
       "components": {
-        "Transform": { "position": [0, 0] },
-        "Rect": { "width": 800, "height": 160, "color": "#18362f" }
+        "Transform": {
+          "position": [
+            0,
+            0
+          ]
+        },
+        "Rect": {
+          "width": 800,
+          "height": 160,
+          "color": "#18362f"
+        },
+        "Layer": {
+          "order": -20,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "grass",
       "components": {
-        "Transform": { "position": [0, 256] },
-        "Rect": { "width": 800, "height": 194, "color": "#5f8f5f" }
+        "Transform": {
+          "position": [
+            0,
+            256
+          ]
+        },
+        "Rect": {
+          "width": 800,
+          "height": 194,
+          "color": "#5f8f5f"
+        },
+        "Layer": {
+          "order": -20,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "lit_floor",
       "components": {
-        "Transform": { "position": [248, 246] },
-        "Rect": { "width": 330, "height": 110, "color": "#9ab96d" }
+        "Transform": {
+          "position": [
+            248,
+            246
+          ]
+        },
+        "Rect": {
+          "width": 330,
+          "height": 110,
+          "color": "#9ab96d"
+        },
+        "Layer": {
+          "order": -20,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "player",
       "components": {
-        "Transform": { "position": [124, 245] },
-        "Sprite": { "texture": "reference-game/player.png" },
-        "PlayerController": { "speed": 125, "mode": "smooth4" }
+        "Transform": {
+          "position": [
+            124,
+            245
+          ]
+        },
+        "Sprite": {
+          "texture": "reference-game/player.png"
+        },
+        "PlayerController": {
+          "speed": 125,
+          "mode": "smooth4"
+        },
+        "Layer": {
+          "order": 20,
+          "ySort": true
+        }
       }
     },
     {
       "tag": "spawn_from_crossroads",
       "components": {
-        "Transform": { "position": [124, 245] },
-        "SpawnPoint": { "name": "from_crossroads" }
+        "Transform": {
+          "position": [
+            124,
+            245
+          ]
+        },
+        "SpawnPoint": {
+          "name": "from_crossroads"
+        }
       }
     },
     {
       "tag": "lantern_gate",
       "components": {
-        "Transform": { "position": [560, 164] },
-        "Rect": { "width": 96, "height": 132, "color": "#315d68" }
+        "Transform": {
+          "position": [
+            560,
+            164
+          ]
+        },
+        "Rect": {
+          "width": 96,
+          "height": 132,
+          "color": "#315d68"
+        },
+        "Layer": {
+          "order": 10,
+          "ySort": true
+        }
       }
     },
     {
       "tag": "gate_light",
       "components": {
-        "Transform": { "position": [608, 176] },
-        "Circle": { "radius": 18, "color": "#ffe28a" }
+        "Transform": {
+          "position": [
+            608,
+            176
+          ]
+        },
+        "Circle": {
+          "radius": 18,
+          "color": "#ffe28a"
+        },
+        "Layer": {
+          "order": 30,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "ring_light_a",
       "components": {
-        "Transform": { "position": [328, 260] },
-        "Circle": { "radius": 10, "color": "#f8d66e" },
+        "Transform": {
+          "position": [
+            328,
+            260
+          ]
+        },
+        "Circle": {
+          "radius": 10,
+          "color": "#f8d66e"
+        },
         "Interactable": {
-          "bounds": [300, 232, 64, 64],
+          "bounds": [
+            300,
+            232,
+            64,
+            64
+          ],
           "prompt": "Listen",
-          "action": { "showMessage": { "text": "The ring holds the path like a remembered song.", "duration": 3 } }
+          "action": {
+            "showMessage": {
+              "text": "The ring holds the path like a remembered song.",
+              "duration": 3
+            }
+          }
+        },
+        "Layer": {
+          "order": 30,
+          "ySort": false
         }
       }
     },
     {
       "tag": "ring_light_b",
       "components": {
-        "Transform": { "position": [432, 260] },
-        "Circle": { "radius": 10, "color": "#f8d66e" }
+        "Transform": {
+          "position": [
+            432,
+            260
+          ]
+        },
+        "Circle": {
+          "radius": 10,
+          "color": "#f8d66e"
+        },
+        "Layer": {
+          "order": 30,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "ring_light_c",
       "components": {
-        "Transform": { "position": [380, 315] },
-        "Circle": { "radius": 10, "color": "#f8d66e" }
+        "Transform": {
+          "position": [
+            380,
+            315
+          ]
+        },
+        "Circle": {
+          "radius": 10,
+          "color": "#f8d66e"
+        },
+        "Layer": {
+          "order": 30,
+          "ySort": false
+        }
       }
     },
     {
       "tag": "memory_marker",
       "components": {
-        "Transform": { "position": [690, 292] },
-        "Rect": { "width": 34, "height": 48, "color": "#6c7481" },
-        "BoxCollider": { "width": 34, "height": 48 },
-        "Solid": { "enabled": true }
+        "Transform": {
+          "position": [
+            690,
+            292
+          ]
+        },
+        "Rect": {
+          "width": 34,
+          "height": 48,
+          "color": "#6c7481"
+        },
+        "BoxCollider": {
+          "width": 34,
+          "height": 48
+        },
+        "Solid": {
+          "enabled": true
+        },
+        "Layer": {
+          "order": 10,
+          "ySort": true
+        }
       }
     },
     {
       "tag": "memory_glow",
       "components": {
-        "Transform": { "position": [707, 288] },
-        "Circle": { "radius": 8, "color": "#d8f1ff" },
+        "Transform": {
+          "position": [
+            707,
+            288
+          ]
+        },
+        "Circle": {
+          "radius": 8,
+          "color": "#d8f1ff"
+        },
         "ParticleEmitter": {
           "color": "#d8f1ff",
           "rate": 0,
@@ -108,6 +284,10 @@
           "speed": 46,
           "spread": 6.28,
           "radius": 2
+        },
+        "Layer": {
+          "order": 30,
+          "ySort": false
         }
       }
     },
@@ -115,9 +295,19 @@
       "tag": "arrival_message",
       "components": {
         "Trigger": {
-          "bounds": [280, 220, 240, 140],
+          "bounds": [
+            280,
+            220,
+            240,
+            140
+          ],
           "oneShot": true,
-          "action": { "showMessage": { "text": "Lanterns mark the safe ground. The trail can grow from here.", "duration": 4 } }
+          "action": {
+            "showMessage": {
+              "text": "Lanterns mark the safe ground. The trail can grow from here.",
+              "duration": 4
+            }
+          }
         }
       }
     },
@@ -125,7 +315,12 @@
       "tag": "west_portal",
       "components": {
         "Portal": {
-          "bounds": [0, 210, 36, 124],
+          "bounds": [
+            0,
+            210,
+            36,
+            124
+          ],
           "scene": "crossroads",
           "spawn": "from_clearing"
         }
@@ -135,13 +330,86 @@
       "tag": "slime_encounter",
       "components": {
         "Interactable": {
-          "bounds": [650, 250, 100, 120],
+          "bounds": [
+            650,
+            250,
+            100,
+            120
+          ],
           "prompt": "Touch memory",
           "repeatable": false,
           "actions": [
-            { "setFlag": { "name": "memory_touched", "value": true } },
-            { "showMessage": { "text": "The memory stirs.", "duration": 1.2 } },
-            { "startCombat": { "encounter": "slime_duo" } }
+            {
+              "setFlag": {
+                "name": "memory_touched",
+                "value": true
+              }
+            },
+            {
+              "showMessage": {
+                "text": "The memory stirs.",
+                "duration": 1.2
+              }
+            },
+            {
+              "startCombat": {
+                "encounter": "slime_duo"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tag": "trail_ending",
+      "components": {
+        "Transform": {
+          "position": [
+            356,
+            164
+          ],
+          "scale": [
+            1,
+            1
+          ],
+          "rotation": 0
+        },
+        "Rect": {
+          "width": 116,
+          "height": 48,
+          "color": "#f0d77a"
+        },
+        "Layer": {
+          "order": 10,
+          "ySort": true
+        },
+        "Trigger": {
+          "bounds": [
+            340,
+            150,
+            148,
+            84
+          ],
+          "oneShot": true,
+          "actions": [
+            {
+              "playSound": {
+                "id": "portal",
+                "volume": 0.8
+              }
+            },
+            {
+              "setFlag": {
+                "name": "ending_reached",
+                "value": true
+              }
+            },
+            {
+              "showMessage": {
+                "text": "The lantern trail is awake. Ending reached.",
+                "duration": 5
+              }
+            }
           ]
         }
       }
