@@ -184,6 +184,9 @@ fn applyComponentPass1(scene: *scenes.Scene, entity: ecs.Entity, comp: types.Com
         .SpawnPoint => |spawn| {
             try scene.world.spawn_points.set(scene.world.allocator, entity, ecs.SpawnPoint.init(spawn.name));
         },
+        .Layer => |layer| {
+            try scene.world.render_layers.set(scene.world.allocator, entity, .{ .order = layer.order, .y_sort = layer.y_sort });
+        },
     }
 
     // Collider defaults: if it's renderable but has no collider yet, try to set one.
@@ -251,6 +254,8 @@ fn lowerTriggerAction(allocator: std.mem.Allocator, action: types.TriggerActionI
             break :blk out;
         },
         .StartCombat => |sc| ecs.TriggerStartCombat(sc.encounter),
+        .PlaySound => |ps| ecs.TriggerPlaySound(ps.id, ps.volume, ps.loop),
+        .SetEntityActive => |sea| ecs.TriggerSetEntityActive(sea.tag, sea.active),
         .Sequence => |items| blk: {
             const out = try allocator.alloc(ecs.TriggerAction, items.len);
             for (items, 0..) |item, i| {

@@ -82,6 +82,7 @@ pub const VolumeFade = struct {
 
 /// Audio manager with dynamic capacity for sound effects and music
 pub const AudioManager = struct {
+    allocator: std.mem.Allocator,
     sounds: std.ArrayList(SoundEntry),
     music: std.ArrayList(MusicEntry),
 
@@ -110,8 +111,9 @@ pub const AudioManager = struct {
     pub fn initWithAllocator(allocator: std.mem.Allocator) Self {
         rl.initAudioDevice();
         return .{
-            .sounds = std.ArrayList(SoundEntry).init(allocator),
-            .music = std.ArrayList(MusicEntry).init(allocator),
+            .allocator = allocator,
+            .sounds = .empty,
+            .music = .empty,
             .initialized = true,
         };
     }
@@ -121,7 +123,6 @@ pub const AudioManager = struct {
         for (&self.loopingSounds) |*entry| {
             if (entry.active) {
                 rl.stopMusicStream(entry.music);
-                rl.unloadMusicStream(entry.music);
                 entry.active = false;
             }
         }
@@ -133,7 +134,7 @@ pub const AudioManager = struct {
                 entry.loaded = false;
             }
         }
-        self.sounds.deinit();
+        self.sounds.deinit(self.allocator);
 
         // Unload all music
         for (self.music.items) |*entry| {
@@ -142,7 +143,7 @@ pub const AudioManager = struct {
                 entry.loaded = false;
             }
         }
-        self.music.deinit();
+        self.music.deinit(self.allocator);
 
         if (self.initialized) {
             rl.closeAudioDevice();
@@ -157,10 +158,10 @@ pub const AudioManager = struct {
         @memcpy(entry.id[0..len], id[0..len]);
         entry.id[len] = 0;
         entry.idLen = len;
-        entry.sound = rl.loadSound(path);
+        entry.sound = try rl.loadSound(path);
         entry.loaded = true;
 
-        try self.sounds.append(entry);
+        try self.sounds.append(self.allocator, entry);
     }
 
     /// Register background music with an id
@@ -170,10 +171,10 @@ pub const AudioManager = struct {
         @memcpy(entry.id[0..len], id[0..len]);
         entry.id[len] = 0;
         entry.idLen = len;
-        entry.music = rl.loadMusicStream(path);
+        entry.music = try rl.loadMusicStream(path);
         entry.loaded = true;
 
-        try self.music.append(entry);
+        try self.music.append(self.allocator, entry);
     }
 
     /// Find a sound by id
@@ -248,13 +249,17 @@ pub const AudioManager = struct {
         // Find empty slot
         for (&self.loopingSounds) |*entry| {
             if (!entry.active) {
+                const source = self.findMusic(id) orelse return;
                 const len = @min(id.len, MAX_ID_LEN - 1);
                 @memcpy(entry.id[0..len], id[0..len]);
                 entry.id[len] = 0;
                 entry.idLen = len;
+                entry.music = source.music;
                 entry.volume = volume;
                 entry.active = true;
                 self.loopingCount += 1;
+                rl.setMusicVolume(entry.music, volume * self.sfxVolume * self.masterVolume);
+                rl.playMusicStream(entry.music);
                 return;
             }
         }

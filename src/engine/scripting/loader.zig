@@ -160,6 +160,8 @@ pub const Loader = struct {
         \\foreign class Engine {
         \\  foreign static showMessage(text, duration)
         \\  foreign static playSound(id, volume, loop)
+        \\  foreign static playMusic(id, fade)
+        \\  foreign static stopMusic(fade)
         \\  foreign static pause(paused)
         \\  foreign static quit()
         \\
@@ -257,6 +259,8 @@ pub const Loader = struct {
         \\class Events {
         \\  static message(text, duration) { Engine.showMessage(text, duration) }
         \\  static playSound(id, volume, loop) { Engine.playSound(id, volume, loop) }
+        \\  static playMusic(id, fade) { Engine.playMusic(id, fade) }
+        \\  static stopMusic(fade) { Engine.stopMusic(fade) }
         \\  static pause(paused) { Engine.pause(paused) }
         \\  static quit() { Engine.quit() }
         \\}

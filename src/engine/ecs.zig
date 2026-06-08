@@ -246,6 +246,17 @@ pub const TriggerAction = union(enum) {
         name_len: usize,
         value: bool,
     },
+    play_sound: struct {
+        id: [events.MAX_ID_LEN]u8,
+        id_len: usize = 0,
+        volume: f32 = 1,
+        loop: bool = false,
+    },
+    set_entity_active: struct {
+        tag: [events.MAX_ID_LEN]u8,
+        tag_len: usize = 0,
+        active: bool = true,
+    },
     start_combat: struct {
         encounter: [events.MAX_ID_LEN]u8,
         encounter_len: usize = 0,
@@ -302,6 +313,24 @@ pub fn TriggerStartCombat(encounter: []const u8) TriggerAction {
     @memcpy(out.start_combat.encounter[0..len], encounter[0..len]);
     out.start_combat.encounter[len] = 0;
     out.start_combat.encounter_len = len;
+    return out;
+}
+
+pub fn TriggerPlaySound(id: []const u8, volume: f32, loop: bool) TriggerAction {
+    var out: TriggerAction = .{ .play_sound = .{ .id = [_]u8{0} ** events.MAX_ID_LEN, .id_len = 0, .volume = volume, .loop = loop } };
+    const len = @min(id.len, events.MAX_ID_LEN - 1);
+    @memcpy(out.play_sound.id[0..len], id[0..len]);
+    out.play_sound.id[len] = 0;
+    out.play_sound.id_len = len;
+    return out;
+}
+
+pub fn TriggerSetEntityActive(tag: []const u8, active: bool) TriggerAction {
+    var out: TriggerAction = .{ .set_entity_active = .{ .tag = [_]u8{0} ** events.MAX_ID_LEN, .tag_len = 0, .active = active } };
+    const len = @min(tag.len, events.MAX_ID_LEN - 1);
+    @memcpy(out.set_entity_active.tag[0..len], tag[0..len]);
+    out.set_entity_active.tag[len] = 0;
+    out.set_entity_active.tag_len = len;
     return out;
 }
 
@@ -407,6 +436,11 @@ pub const SpawnPoint = struct {
 
 pub const Active = struct {
     value: bool = true,
+};
+
+pub const RenderLayer = struct {
+    order: i32 = 0,
+    y_sort: bool = false,
 };
 
 pub fn ComponentStorage(comptime T: type) type {
@@ -562,6 +596,7 @@ pub const World = struct {
     portals: ComponentStorage(Portal) = .{},
     spawn_points: ComponentStorage(SpawnPoint) = .{},
     actives: ComponentStorage(Active) = .{},
+    render_layers: ComponentStorage(RenderLayer) = .{},
 
     bounds_width: f32 = 800,
     bounds_height: f32 = 450,
@@ -602,6 +637,7 @@ pub const World = struct {
         try self.portals.init(allocator, max_entities);
         try self.spawn_points.init(allocator, max_entities);
         try self.actives.init(allocator, max_entities);
+        try self.render_layers.init(allocator, max_entities);
 
         return self;
     }
@@ -625,6 +661,7 @@ pub const World = struct {
         self.portals.deinit(self.allocator);
         self.spawn_points.deinit(self.allocator);
         self.actives.deinit(self.allocator);
+        self.render_layers.deinit(self.allocator);
 
         self.entity_generations.deinit(self.allocator);
         self.entity_alive.deinit(self.allocator);
@@ -661,6 +698,7 @@ pub const World = struct {
         try self.portals.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.spawn_points.ensureEntityCapacity(self.allocator, self.max_entities);
         try self.actives.ensureEntityCapacity(self.allocator, self.max_entities);
+        try self.render_layers.ensureEntityCapacity(self.allocator, self.max_entities);
     }
 
     pub fn entityFromId(self: *const Self, entity_id: u32) Entity {
@@ -717,6 +755,7 @@ pub const World = struct {
         self.portals.remove(entity);
         self.spawn_points.remove(entity);
         self.actives.remove(entity);
+        self.render_layers.remove(entity);
 
         self.entity_alive.items[entity.id] = false;
         self.entity_generations.items[entity.id] += 1;
@@ -1010,6 +1049,7 @@ pub const Systems = struct {
             if (!world.isActive(entity)) continue;
             const portal = item.data;
             if (!rl.checkCollisionRecs(player_rect, portal.bounds)) continue;
+            world.state.eventQueue.push(events.playSound("portal", 0.7, false)) catch {};
             world.state.eventQueue.push(events.changeSceneByNameToSpawn(portal.sceneName(), portal.spawnName())) catch {};
             return;
         }
@@ -1065,6 +1105,11 @@ pub const Systems = struct {
     }
 
     pub fn render(world: *World) void {
+        if (world.render_layers.dense_entities.items.len > 0) {
+            renderLayered(world);
+            return;
+        }
+
         {
             var it = world.tilemaps.iterator();
             while (it.next()) |item| {
@@ -1170,6 +1215,144 @@ pub const Systems = struct {
                     color.a = alpha;
                     rl.drawCircle(@intFromFloat(p.position.x), @intFromFloat(p.position.y), emitter.radius, color);
                 }
+            }
+        }
+    }
+
+    const RenderItem = struct {
+        entity: Entity,
+        order: i32,
+        y: f32,
+        y_sort: bool,
+    };
+
+    fn renderLayered(world: *World) void {
+        var items: [2048]RenderItem = undefined;
+        var count: usize = 0;
+
+        var entity_id: u32 = 0;
+        while (entity_id < world.next_entity_id and count < items.len) : (entity_id += 1) {
+            const entity = world.entityFromId(entity_id);
+            if (!world.isActive(entity)) continue;
+            if (!isRenderable(world, entity)) continue;
+
+            const layer = if (world.render_layers.getConst(entity)) |layer| layer.* else RenderLayer{};
+            items[count] = .{
+                .entity = entity,
+                .order = layer.order,
+                .y = renderSortY(world, entity),
+                .y_sort = layer.y_sort,
+            };
+            count += 1;
+        }
+
+        std.mem.sort(RenderItem, items[0..count], {}, compareRenderItems);
+
+        for (items[0..count]) |item| {
+            renderEntity(world, item.entity);
+        }
+    }
+
+    fn compareRenderItems(_: void, a: RenderItem, b: RenderItem) bool {
+        if (a.order != b.order) return a.order < b.order;
+        if ((a.y_sort or b.y_sort) and a.y != b.y) return a.y < b.y;
+        return a.entity.id < b.entity.id;
+    }
+
+    fn isRenderable(world: *World, entity: Entity) bool {
+        return world.tilemaps.has(entity) or
+            world.circle_renderers.has(entity) or
+            world.rect_renderers.has(entity) or
+            world.sprite_renderers.has(entity) or
+            world.particle_emitters.has(entity);
+    }
+
+    fn renderSortY(world: *World, entity: Entity) f32 {
+        const tr = world.transforms.getConst(entity) orelse return 0;
+        if (world.box_colliders.getConst(entity)) |col| return tr.position.y + col.offset.y + col.height;
+        if (world.sprite_renderers.getConst(entity)) |sr| {
+            const h = if (sr.frame_height > 0) sr.frame_height else @as(f32, @floatFromInt(sr.texture.height));
+            return tr.position.y + h * @abs(tr.scale.y);
+        }
+        if (world.rect_renderers.getConst(entity)) |rect| return tr.position.y + rect.height;
+        if (world.circle_renderers.getConst(entity)) |circle| return tr.position.y + circle.radius;
+        if (world.tilemaps.getConst(entity)) |map| return tr.position.y + @as(f32, @floatFromInt(map.rows)) * map.tile_height;
+        return tr.position.y;
+    }
+
+    fn renderEntity(world: *World, entity: Entity) void {
+        const tr = world.transforms.getConst(entity);
+
+        if (world.tilemaps.getConst(entity)) |map| {
+            const transform = tr orelse return;
+            for (0..map.rows) |row| {
+                for (0..map.columns) |col| {
+                    const tile = map.tileAt(col, row);
+                    if (tile == 0) continue;
+                    const color = if (tile - 1 < map.palette.len) map.palette[tile - 1] else rl.Color.gray;
+                    rl.drawRectangle(
+                        @intFromFloat(transform.position.x + @as(f32, @floatFromInt(col)) * map.tile_width),
+                        @intFromFloat(transform.position.y + @as(f32, @floatFromInt(row)) * map.tile_height),
+                        @intFromFloat(map.tile_width),
+                        @intFromFloat(map.tile_height),
+                        color,
+                    );
+                }
+            }
+        }
+
+        if (world.circle_renderers.getConst(entity)) |circle| {
+            const transform = tr orelse return;
+            rl.drawCircle(@intFromFloat(transform.position.x), @intFromFloat(transform.position.y), circle.radius, circle.color);
+        }
+
+        if (world.rect_renderers.getConst(entity)) |rect| {
+            const transform = tr orelse return;
+            rl.drawRectangle(
+                @intFromFloat(transform.position.x),
+                @intFromFloat(transform.position.y),
+                @intFromFloat(rect.width),
+                @intFromFloat(rect.height),
+                rect.color,
+            );
+        }
+
+        if (world.sprite_renderers.getConst(entity)) |sr| {
+            const transform = tr orelse return;
+            const texture_w: f32 = @floatFromInt(sr.texture.width);
+            const texture_h: f32 = @floatFromInt(sr.texture.height);
+            const sprite_w: f32 = if (sr.frame_width > 0) sr.frame_width else texture_w;
+            const sprite_h: f32 = if (sr.frame_height > 0) sr.frame_height else texture_h;
+            const columns = @max(1, @as(usize, @intFromFloat(@floor(texture_w / sprite_w))));
+            const frame = @min(sr.current_frame, sr.start_frame + sr.frames - 1);
+            const frame_x: f32 = @floatFromInt(frame % columns);
+            const frame_y: f32 = @floatFromInt(frame / columns);
+
+            const flip = sr.flip_x or transform.scale.x < 0;
+            const src = rl.Rectangle{
+                .x = frame_x * sprite_w + if (flip) sprite_w else 0,
+                .y = frame_y * sprite_h,
+                .width = if (flip) -sprite_w else sprite_w,
+                .height = sprite_h,
+            };
+
+            const dest = rl.Rectangle{
+                .x = transform.position.x,
+                .y = transform.position.y,
+                .width = sprite_w * @abs(transform.scale.x),
+                .height = sprite_h * @abs(transform.scale.y),
+            };
+
+            rl.drawTexturePro(sr.texture, src, dest, .{ .x = 0, .y = 0 }, transform.rotation, sr.tint);
+        }
+
+        if (world.particle_emitters.getConst(entity)) |emitter| {
+            for (emitter.particles) |p| {
+                if (p.life <= 0) continue;
+                const alpha = @as(u8, @intFromFloat(std.math.clamp(p.life / @max(p.max_life, 0.001), 0, 1) * 255));
+                var color = emitter.color;
+                color.a = alpha;
+                rl.drawCircle(@intFromFloat(p.position.x), @intFromFloat(p.position.y), emitter.radius, color);
             }
         }
     }
@@ -1314,6 +1497,12 @@ pub const Systems = struct {
             },
             .set_flag => |sf| {
                 world.state.eventQueue.push(events.setFlag(sf.name[0..sf.name_len], sf.value)) catch {};
+            },
+            .play_sound => |ps| {
+                world.state.eventQueue.push(events.playSound(ps.id[0..ps.id_len], ps.volume, ps.loop)) catch {};
+            },
+            .set_entity_active => |sea| {
+                world.state.eventQueue.push(events.setEntityActive(sea.tag[0..sea.tag_len], sea.active)) catch {};
             },
             .start_combat => |sc| {
                 _ = world.state.combatState.start(sc.encounter[0..sc.encounter_len]);

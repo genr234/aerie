@@ -62,7 +62,7 @@ pub const Runtime = struct {
     tick_count: usize = 0,
 
     // desktop auto-reload.
-    last_mtime_ns: ?i96 = null,
+    last_mtime_ns: ?i128 = null,
 
     // Captured by errorFn for easier debugging.
     last_error: [256]u8 = [_]u8{0} ** 256,

@@ -79,6 +79,16 @@ pub const PlaySound = struct {
     }
 };
 
+pub const PlayMusic = struct {
+    musicId: [MAX_ID_LEN]u8 = undefined,
+    musicIdLen: usize = 0,
+    fade: f32 = 0,
+
+    pub fn getMusicId(self: *const PlayMusic) []const u8 {
+        return self.musicId[0..self.musicIdLen];
+    }
+};
+
 pub const SetEntityActive = struct {
     entityTag: [MAX_ID_LEN]u8 = undefined,
     tagLen: usize = 0,
@@ -95,6 +105,8 @@ pub const Event = union(enum) {
     ChangeScene: ChangeScene,
     SetFlag: SetFlag,
     PlaySound: PlaySound,
+    PlayMusic: PlayMusic,
+    StopMusic: struct { fade: f32 = 0 },
     SetEntityActive: SetEntityActive,
     PauseGame: struct { paused: bool = true },
     QuitGame: void,
@@ -182,6 +194,18 @@ pub fn playSound(soundId: []const u8, volume: f32, loop: bool) Event {
     @memcpy(ev.soundId[0..len], soundId[0..len]);
     ev.soundId[len] = 0;
     return .{ .PlaySound = ev };
+}
+
+pub fn playMusic(musicId: []const u8, fade: f32) Event {
+    const len = @min(musicId.len, MAX_ID_LEN - 1);
+    var ev: PlayMusic = .{ .musicIdLen = len, .fade = fade };
+    @memcpy(ev.musicId[0..len], musicId[0..len]);
+    ev.musicId[len] = 0;
+    return .{ .PlayMusic = ev };
+}
+
+pub fn stopMusic(fade: f32) Event {
+    return .{ .StopMusic = .{ .fade = fade } };
 }
 
 pub fn setEntityActive(tag: []const u8, active: bool) Event {
@@ -357,6 +381,28 @@ pub const EventQueue = struct {
                         mgr.playSoundLooped(ps.getSoundId(), ps.volume);
                     } else {
                         mgr.playSound(ps.getSoundId(), ps.volume);
+                    }
+                }
+                return true;
+            },
+
+            .PlayMusic => |pm| {
+                if (self.systems.audioManager) |mgr| {
+                    if (pm.fade > 0) {
+                        mgr.playMusicFadeIn(pm.getMusicId(), pm.fade);
+                    } else {
+                        mgr.playMusic(pm.getMusicId());
+                    }
+                }
+                return true;
+            },
+
+            .StopMusic => |sm| {
+                if (self.systems.audioManager) |mgr| {
+                    if (sm.fade > 0) {
+                        mgr.fadeOutMusic(sm.fade);
+                    } else {
+                        mgr.stopMusic();
                     }
                 }
                 return true;

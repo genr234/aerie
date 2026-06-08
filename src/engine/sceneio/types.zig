@@ -37,6 +37,7 @@ pub const ComponentIR = union(enum) {
     Interactable: InteractableIR,
     Portal: PortalIR,
     SpawnPoint: SpawnPointIR,
+    Layer: LayerIR,
 };
 
 pub const TransformIR = struct {
@@ -161,12 +162,19 @@ pub const SpawnPointIR = struct {
     name: []const u8,
 };
 
+pub const LayerIR = struct {
+    order: i32 = 0,
+    y_sort: bool = false,
+};
+
 pub const TriggerActionIR = union(enum) {
     StartDialogue: struct { id: ?[]const u8 = null, label: ?[]const u8 = null },
     ShowMessage: struct { text: []const u8, duration: f32 = 2.0 },
     ChangeScene: struct { index: ?usize = null, name: ?[]const u8 = null },
     SetFlag: struct { name: []const u8, value: bool = true },
     StartCombat: struct { encounter: []const u8 },
+    PlaySound: struct { id: []const u8, volume: f32 = 1, loop: bool = false },
+    SetEntityActive: struct { tag: []const u8, active: bool = true },
     Sequence: []const TriggerActionIR,
 };
 

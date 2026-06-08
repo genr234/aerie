@@ -25,6 +25,7 @@ pub const ProjectConfig = struct {
     scripts: []ScriptDecl = &.{},
     dialogues: []DialogueDecl = &.{},
     combat: ?CombatDecl = null,
+    audio: AudioDecl = .{},
 
     window_width: i32 = 800,
     window_height: i32 = 450,
@@ -47,6 +48,16 @@ pub const DialogueDecl = struct {
 };
 
 pub const CombatDecl = struct {
+    path: []const u8,
+};
+
+pub const AudioDecl = struct {
+    sounds: []AudioAssetDecl = &.{},
+    music: []AudioAssetDecl = &.{},
+};
+
+pub const AudioAssetDecl = struct {
+    id: []const u8,
     path: []const u8,
 };
 
@@ -308,6 +319,7 @@ fn parseProjectConfig(allocator: std.mem.Allocator, root: std.json.Value) !Proje
     if (obj.get("scripts")) |s| cfg.scripts = try parseScriptDecls(allocator, s);
     if (obj.get("dialogues")) |d| cfg.dialogues = try parseDialogueDecls(allocator, d);
     if (obj.get("combat")) |c| cfg.combat = try parseCombatDecl(allocator, c);
+    if (obj.get("audio")) |a| cfg.audio = try parseAudioDecl(allocator, a);
 
     if (obj.get("window")) |w| {
         if (w != .object) return ProjectError.InvalidType;
@@ -438,6 +450,31 @@ fn parseCombatDecl(allocator: std.mem.Allocator, v: std.json.Value) !CombatDecl 
     return .{ .path = try dupString(allocator, try getString(v.object, "path")) };
 }
 
+fn parseAudioDecl(allocator: std.mem.Allocator, v: std.json.Value) !AudioDecl {
+    if (v != .object) return ProjectError.InvalidType;
+    var out: AudioDecl = .{};
+    if (v.object.get("sounds")) |sounds| out.sounds = try parseAudioAssetDecls(allocator, sounds);
+    if (v.object.get("music")) |music| out.music = try parseAudioAssetDecls(allocator, music);
+    return out;
+}
+
+fn parseAudioAssetDecls(allocator: std.mem.Allocator, v: std.json.Value) ![]AudioAssetDecl {
+    if (v != .array) return ProjectError.InvalidType;
+
+    const out = try allocator.alloc(AudioAssetDecl, v.array.items.len);
+    errdefer allocator.free(out);
+
+    for (v.array.items, 0..) |item, i| {
+        if (item != .object) return ProjectError.InvalidType;
+        out[i] = .{
+            .id = try dupString(allocator, try getString(item.object, "id")),
+            .path = try dupString(allocator, try getString(item.object, "path")),
+        };
+    }
+
+    return out;
+}
+
 fn sceneDeclsContainStart(decls: []const SceneDecl, start_scene: []const u8) bool {
     for (decls) |decl| {
         if (std.mem.eql(u8, decl.name, start_scene)) return true;
@@ -484,7 +521,11 @@ test "project config parses declared scenes and start scene name" {
         \\  ],
         \\  "scripts": [
         \\    { "name": "main", "path": "assets/scripts/main.wren" }
-        \\  ]
+        \\  ],
+        \\  "audio": {
+        \\    "sounds": [{ "id": "interact", "path": "audio/interact.wav" }],
+        \\    "music": [{ "id": "ambient", "path": "audio/ambient.ogg" }]
+        \\  }
         \\}
     ;
 
@@ -496,6 +537,12 @@ test "project config parses declared scenes and start scene name" {
     try std.testing.expectEqual(@as(usize, 1), cfg.scripts.len);
     try std.testing.expectEqualStrings("main", cfg.scripts[0].name);
     try std.testing.expectEqualStrings("assets/scripts/main.wren", cfg.scripts[0].path);
+    try std.testing.expectEqual(@as(usize, 1), cfg.audio.sounds.len);
+    try std.testing.expectEqualStrings("interact", cfg.audio.sounds[0].id);
+    try std.testing.expectEqualStrings("audio/interact.wav", cfg.audio.sounds[0].path);
+    try std.testing.expectEqual(@as(usize, 1), cfg.audio.music.len);
+    try std.testing.expectEqualStrings("ambient", cfg.audio.music[0].id);
+    try std.testing.expectEqualStrings("audio/ambient.ogg", cfg.audio.music[0].path);
 }
 
 test "project bundle resolves start scene by declared scene name" {

@@ -22,6 +22,7 @@ pub fn main(init_ctx: std.process.Init) !void {
         }
     }
 
+    engine_mod.rl.setExitKey(engine_mod.rl.KeyboardKey.f4);
     engine.init(project_root) catch |err| {
         std.debug.print("[runtime] engine init failed for '{s}': {any}\n", .{ project_root, err });
         return err;
@@ -33,8 +34,6 @@ pub fn main(init_ctx: std.process.Init) !void {
         engine.draw();
         emscripten_set_main_loop(gameLoop, 0, 1);
     } else {
-        engine.tick();
-        engine.draw();
         while (!engine_mod.rl.windowShouldClose()) {
             engine.tick();
             engine.draw();

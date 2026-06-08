@@ -20,6 +20,8 @@ pub const Api = struct {
     const engine_map = std.StaticStringMap(wren_c.c.WrenForeignMethodFn).initComptime(.{
         .{ "showMessage(_,_)", &events_showMessage },
         .{ "playSound(_,_,_)", &events_playSound },
+        .{ "playMusic(_,_)", &events_playMusic },
+        .{ "stopMusic(_)", &events_stopMusic },
         .{ "pause(_)", &events_pause },
         .{ "quit", &events_quit },
         .{ "quit()", &events_quit },
@@ -123,6 +125,41 @@ pub const Api = struct {
         _ = vm;
     }
 
+    pub fn writeSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        return writeSaveSlot(ctx, slot) catch |err| blk: {
+            log.debug("[save] write '{s}' failed: {any}\n", .{ slot, err });
+            break :blk false;
+        };
+    }
+
+    pub fn loadSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        return loadSaveSlot(ctx, slot) catch |err| blk: {
+            log.debug("[save] load '{s}' failed: {any}\n", .{ slot, err });
+            break :blk false;
+        };
+    }
+
+    pub fn saveExists(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        const path = saveSlotPath(ctx.projectRoot, slot) catch return false;
+        defer std.heap.page_allocator.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        return if (std.Io.Dir.cwd().access(io, path, .{})) true else |_| false;
+    }
+
+    pub fn clearSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        const path = saveSlotPath(ctx.projectRoot, slot) catch return false;
+        defer std.heap.page_allocator.free(path);
+        const io = std.Io.Threaded.global_single_threaded.io();
+        std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
+            error.FileNotFound => {},
+            else => {
+                log.debug("[save] clear '{s}' failed: {any}\n", .{ slot, err });
+                return false;
+            },
+        };
+        return true;
+    }
+
     pub fn foreignClass(
         vm: ?*wren_c.c.WrenVM,
         module: [*c]const u8,
@@ -200,6 +237,24 @@ pub const Api = struct {
 
         var ctx = getCtx(vm);
         ctx.eventQueue.push(events.playSound(sound_id, volume, loop)) catch {};
+    }
+
+    fn events_playMusic(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        var id_buf: [events.MAX_ID_LEN]u8 = undefined;
+        const music_id = getSlotString(vm, 1, &id_buf);
+        const fade = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 2)));
+
+        var ctx = getCtx(vm);
+        ctx.eventQueue.push(events.playMusic(music_id, fade)) catch {};
+    }
+
+    fn events_stopMusic(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
+        const vm = vm_opt.?;
+        const fade = @as(f32, @floatCast(wren_c.c.wrenGetSlotDouble(vm, 1)));
+
+        var ctx = getCtx(vm);
+        ctx.eventQueue.push(events.stopMusic(fade)) catch {};
     }
 
     fn events_pause(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -393,11 +448,7 @@ pub const Api = struct {
         var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
         const slot = getSlotString(vm, 1, &slot_buf);
         const ctx = getCtx(vm);
-        const ok = writeSaveSlot(ctx, slot) catch |err| blk: {
-            log.debug("[save] write '{s}' failed: {any}\n", .{ slot, err });
-            break :blk false;
-        };
-        wren_c.c.wrenSetSlotBool(vm, 0, ok);
+        wren_c.c.wrenSetSlotBool(vm, 0, writeSave(ctx, slot));
     }
 
     fn save_load(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -405,11 +456,7 @@ pub const Api = struct {
         var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
         const slot = getSlotString(vm, 1, &slot_buf);
         const ctx = getCtx(vm);
-        const ok = loadSaveSlot(ctx, slot) catch |err| blk: {
-            log.debug("[save] load '{s}' failed: {any}\n", .{ slot, err });
-            break :blk false;
-        };
-        wren_c.c.wrenSetSlotBool(vm, 0, ok);
+        wren_c.c.wrenSetSlotBool(vm, 0, loadSave(ctx, slot));
     }
 
     fn save_exists(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -417,14 +464,7 @@ pub const Api = struct {
         var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
         const slot = getSlotString(vm, 1, &slot_buf);
         const ctx = getCtx(vm);
-        const path = saveSlotPath(ctx.projectRoot, slot) catch {
-            wren_c.c.wrenSetSlotBool(vm, 0, false);
-            return;
-        };
-        defer std.heap.page_allocator.free(path);
-        const io = std.Io.Threaded.global_single_threaded.io();
-        const exists = if (std.Io.Dir.cwd().access(io, path, .{})) true else |_| false;
-        wren_c.c.wrenSetSlotBool(vm, 0, exists);
+        wren_c.c.wrenSetSlotBool(vm, 0, saveExists(ctx, slot));
     }
 
     fn save_clear(vm_opt: ?*wren_c.c.WrenVM) callconv(.c) void {
@@ -432,21 +472,7 @@ pub const Api = struct {
         var slot_buf: [events.MAX_ID_LEN]u8 = undefined;
         const slot = getSlotString(vm, 1, &slot_buf);
         const ctx = getCtx(vm);
-        const path = saveSlotPath(ctx.projectRoot, slot) catch {
-            wren_c.c.wrenSetSlotBool(vm, 0, false);
-            return;
-        };
-        defer std.heap.page_allocator.free(path);
-        const io = std.Io.Threaded.global_single_threaded.io();
-        std.Io.Dir.cwd().deleteFile(io, path) catch |err| switch (err) {
-            error.FileNotFound => {},
-            else => {
-                log.debug("[save] clear '{s}' failed: {any}\n", .{ slot, err });
-                wren_c.c.wrenSetSlotBool(vm, 0, false);
-                return;
-            },
-        };
-        wren_c.c.wrenSetSlotBool(vm, 0, true);
+        wren_c.c.wrenSetSlotBool(vm, 0, clearSave(ctx, slot));
     }
 
     fn writeSaveSlot(ctx: *context.ScriptingContext, slot: []const u8) !bool {

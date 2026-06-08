@@ -16,9 +16,11 @@ const ui = @import("ui.zig");
 const state = @import("state.zig");
 const vn = @import("vn.zig");
 const combat = @import("combat.zig");
+const audio = @import("audio.zig");
 
 const scripting = @import("scripting/runtime.zig");
 const scripting_context = @import("scripting/context.zig");
+const scripting_api = @import("scripting/api.zig");
 
 const sceneio_json = @import("sceneio/json.zig");
 const sceneio_instantiate = @import("sceneio/instantiate.zig");
@@ -38,10 +40,16 @@ pub const Engine = struct {
     scriptCtx: scripting_context.ScriptingContext = undefined,
     wrenRuntime: ?scripting.Runtime = null,
     textureEntries: []sceneio_instantiate.TextureTable.Entry = &.{},
+    audioManager: audio.AudioManager = undefined,
+    audioInitialized: bool = false,
 
     project_root: []const u8 = ".",
 
     modeStack: ModeStack = .{},
+    saveMenuOpen: bool = false,
+    saveStatus: [96]u8 = [_]u8{0} ** 96,
+    saveStatusLen: usize = 0,
+    saveStatusTimer: f32 = 0,
 
     const Self = @This();
 
@@ -64,6 +72,7 @@ pub const Engine = struct {
         const ztitle = try mem.frame().dupeZ(u8, project_cfg.window_title);
         rl.initWindow(project_cfg.window_width, project_cfg.window_height, ztitle);
         rl.setTargetFPS(60);
+        self.audioInitialized = try self.loadAudioAssets(project_cfg.audio);
 
         // Systems
         self.gameState.eventQueue = events.EventQueue.init();
@@ -98,6 +107,7 @@ pub const Engine = struct {
         self.gameState.vnState.setDialogueRunner(&self.gameState.vnDialogue);
         self.gameState.vnState.setStoryState(&self.gameState.storyState);
         self.gameState.vnState.setEventQueue(&self.gameState.eventQueue);
+        if (self.audioInitialized) self.gameState.vnState.setAudioManager(&self.audioManager);
 
         self.gameState.manager = undefined;
         self.gameState.sceneBuilder = undefined;
@@ -110,10 +120,12 @@ pub const Engine = struct {
         self.gameState.manager = &self.sceneManager;
         self.gameState.sceneBuilder = &self.sceneBuilder;
 
-        self.gameState.eventQueue.bindSystems(.{
+        var systems = events.GameSystems{
             .sceneManager = self.gameState.manager,
             .storyState = &self.gameState.storyState,
-        });
+        };
+        if (self.audioInitialized) systems.audioManager = &self.audioManager;
+        self.gameState.eventQueue.bindSystems(systems);
 
         const scene_irs = try mem.permanent().alloc(sceneio_types.SceneIR, bundle.scenes.len);
         for (bundle.scenes, 0..) |scene_source, i| {
@@ -170,6 +182,29 @@ pub const Engine = struct {
         self.initialized = true;
     }
 
+    fn loadAudioAssets(self: *Self, audio_decl: project.AudioDecl) !bool {
+        if (audio_decl.sounds.len == 0 and audio_decl.music.len == 0) return false;
+
+        self.audioManager = audio.AudioManager.init();
+        errdefer self.audioManager.deinit();
+
+        for (audio_decl.sounds) |decl| {
+            const path = try assets.parseAssetPath(mem.frame(), self.project_root, decl.path, builtin.os.tag);
+            self.audioManager.registerSound(decl.id, path) catch |err| {
+                log.debug("Failed to load sound '{s}' from '{s}': {any}\n", .{ decl.id, decl.path, err });
+            };
+        }
+
+        for (audio_decl.music) |decl| {
+            const path = try assets.parseAssetPath(mem.frame(), self.project_root, decl.path, builtin.os.tag);
+            self.audioManager.registerMusic(decl.id, path) catch |err| {
+                log.debug("Failed to load music '{s}' from '{s}': {any}\n", .{ decl.id, decl.path, err });
+            };
+        }
+
+        return true;
+    }
+
     pub fn deinit(self: *Self) void {
         if (!self.initialized) return;
 
@@ -190,6 +225,10 @@ pub const Engine = struct {
             rl.unloadTexture(entry.texture);
         }
         self.textureEntries = &.{};
+        if (self.audioInitialized) {
+            self.audioManager.deinit();
+            self.audioInitialized = false;
+        }
         rl.closeWindow();
 
         mem.deinit();
@@ -201,6 +240,19 @@ pub const Engine = struct {
 
         mem.resetFrame();
         const dt = @min(rl.getFrameTime(), maxFrameDt);
+
+        if (rl.isKeyPressed(.escape)) {
+            self.saveMenuOpen = !self.saveMenuOpen;
+        }
+
+        if (self.saveStatusTimer > 0) {
+            self.saveStatusTimer = @max(0, self.saveStatusTimer - dt);
+        }
+
+        if (self.saveMenuOpen) {
+            if (self.audioInitialized) self.audioManager.update(dt);
+            return;
+        }
 
         if (rl.isKeyPressed(.v)) {
             if (!self.gameState.vnActive) {
@@ -230,6 +282,7 @@ pub const Engine = struct {
         }
 
         self.gameState.eventQueue.process(dt);
+        if (self.audioInitialized) self.audioManager.update(dt);
     }
 
     pub fn draw(self: *Self) void {
@@ -242,7 +295,63 @@ pub const Engine = struct {
             mode.draw(self);
         }
 
+        self.drawSaveMenu();
+
         rl.endDrawing();
+    }
+
+    fn setSaveStatus(self: *Self, text: []const u8) void {
+        const len = @min(text.len, self.saveStatus.len - 1);
+        @memcpy(self.saveStatus[0..len], text[0..len]);
+        self.saveStatus[len] = 0;
+        self.saveStatusLen = len;
+        self.saveStatusTimer = 2.5;
+    }
+
+    fn drawSaveMenu(self: *Self) void {
+        const slot = "slot1";
+        const has_save = scripting_api.Api.saveExists(&self.scriptCtx, slot);
+
+        if (!self.saveMenuOpen) {
+            if (self.saveStatusTimer > 0 and self.saveStatusLen > 0) {
+                rl.drawText(self.saveStatus[0..self.saveStatusLen :0], 18, rl.getScreenHeight() - 30, 18, rl.Color{ .r = 30, .g = 34, .b = 42, .a = 230 });
+            }
+            return;
+        }
+
+        const screen_w: f32 = @floatFromInt(rl.getScreenWidth());
+        const screen_h: f32 = @floatFromInt(rl.getScreenHeight());
+        rl.drawRectangle(0, 0, rl.getScreenWidth(), rl.getScreenHeight(), rl.Color{ .r = 0, .g = 0, .b = 0, .a = 110 });
+
+        const panel_w: f32 = 300;
+        const panel_h: f32 = 282;
+        const x = (screen_w - panel_w) / 2;
+        const y = (screen_h - panel_h) / 2;
+        ui.UI.panel(x, y, panel_w, panel_h);
+        rl.drawRectangleLinesEx(.{ .x = x, .y = y, .width = panel_w, .height = panel_h }, 2, rl.Color{ .r = 230, .g = 236, .b = 245, .a = 255 });
+        rl.drawText("Game Menu", @intFromFloat(x + 24), @intFromFloat(y + 20), 24, rl.Color.white);
+        rl.drawText(if (has_save) "Save slot: ready" else "Save slot: empty", @intFromFloat(x + 24), @intFromFloat(y + 56), 16, rl.Color.light_gray);
+
+        if (ui.UI.button(x + 24, y + 88, panel_w - 48, 34, "Save Game")) {
+            self.setSaveStatus(if (scripting_api.Api.writeSave(&self.scriptCtx, slot)) "Game saved." else "Save failed.");
+        }
+
+        if (ui.UI.button(x + 24, y + 130, panel_w - 48, 34, if (has_save) "Load Game" else "No Save Found")) {
+            self.setSaveStatus(if (has_save and scripting_api.Api.loadSave(&self.scriptCtx, slot)) "Game loaded." else "No save to load.");
+            if (has_save) self.saveMenuOpen = false;
+        }
+
+        if (ui.UI.button(x + 24, y + 172, panel_w - 48, 34, if (has_save) "Clear Save" else "Clear Save")) {
+            self.setSaveStatus(if (scripting_api.Api.clearSave(&self.scriptCtx, slot)) "Save cleared." else "Clear failed.");
+        }
+
+        if (ui.UI.button(x + 24, y + 214, panel_w - 48, 34, "Resume")) {
+            self.saveMenuOpen = false;
+        }
+
+        if (self.saveStatusTimer > 0 and self.saveStatusLen > 0) {
+            rl.drawText(self.saveStatus[0..self.saveStatusLen :0], @intFromFloat(x + 24), @intFromFloat(y + panel_h - 30), 16, rl.Color{ .r = 180, .g = 220, .b = 255, .a = 255 });
+        }
     }
 
     fn syncCombatMode(self: *Self) void {

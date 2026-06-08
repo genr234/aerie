@@ -186,6 +186,10 @@ fn parseComponent(allocator: std.mem.Allocator, key: []const u8, v: std.json.Val
         return .{ .SpawnPoint = try parseSpawnPoint(allocator, v) };
     }
 
+    if (std.mem.eql(u8, key, "Layer")) {
+        return .{ .Layer = try parseLayer(v) };
+    }
+
     return JsonError.InvalidValue;
 }
 
@@ -198,6 +202,15 @@ fn parseTransform(v: std.json.Value) !types.TransformIR {
     if (v.object.get("rotation")) |r| out.rotation = @floatCast(try asFloat(r));
     if (v.object.get("scale")) |s| out.scale = try parseVec2(s);
 
+    return out;
+}
+
+fn parseLayer(v: std.json.Value) !types.LayerIR {
+    if (v != .object) return JsonError.InvalidType;
+
+    var out: types.LayerIR = .{};
+    if (v.object.get("order")) |order| out.order = @intCast(try asInt(order));
+    if (v.object.get("ySort")) |y_sort| out.y_sort = try asBool(y_sort);
     return out;
 }
 
@@ -453,6 +466,24 @@ fn parseTriggerAction(allocator: std.mem.Allocator, v: std.json.Value) ParseErro
         return .{ .StartCombat = .{ .encounter = try dupString(allocator, try asString(encounter_val)) } };
     }
 
+    if (v.object.get("playSound")) |ps| {
+        if (ps != .object) return JsonError.InvalidType;
+        const id_val = ps.object.get("id") orelse return JsonError.MissingField;
+        var volume: f32 = 1;
+        var loop = false;
+        if (ps.object.get("volume")) |vv| volume = @floatCast(try asFloat(vv));
+        if (ps.object.get("loop")) |vv| loop = try asBool(vv);
+        return .{ .PlaySound = .{ .id = try dupString(allocator, try asString(id_val)), .volume = volume, .loop = loop } };
+    }
+
+    if (v.object.get("setEntityActive")) |sea| {
+        if (sea != .object) return JsonError.InvalidType;
+        const tag_val = sea.object.get("tag") orelse return JsonError.MissingField;
+        var active = true;
+        if (sea.object.get("active")) |vv| active = try asBool(vv);
+        return .{ .SetEntityActive = .{ .tag = try dupString(allocator, try asString(tag_val)), .active = active } };
+    }
+
     return JsonError.InvalidValue;
 }
 
@@ -604,4 +635,67 @@ test "scene parser rejects unknown component" {
     ;
 
     try std.testing.expectError(JsonError.InvalidValue, parseSceneIR(std.testing.allocator, text));
+}
+
+test "scene parser accepts render layer component" {
+    const text =
+        \\{
+        \\  "name": "layered",
+        \\  "entities": [
+        \\    {
+        \\      "tag": "player",
+        \\      "components": {
+        \\        "Transform": { "position": [0, 0] },
+        \\        "Layer": { "order": 20, "ySort": true }
+        \\      }
+        \\    }
+        \\  ]
+        \\}
+    ;
+
+    const ir = try parseSceneIR(std.testing.allocator, text);
+    try std.testing.expectEqual(@as(usize, 1), ir.entities.len);
+    var found_layer = false;
+    for (ir.entities[0].components) |component| {
+        switch (component) {
+            .Layer => |layer| {
+                found_layer = true;
+                try std.testing.expectEqual(@as(i32, 20), layer.order);
+                try std.testing.expect(layer.y_sort);
+            },
+            else => {},
+        }
+    }
+    try std.testing.expect(found_layer);
+}
+
+test "scene parser accepts sound and entity-active actions" {
+    const text =
+        \\{
+        \\  "name": "actions",
+        \\  "entities": [
+        \\    {
+        \\      "tag": "collectible",
+        \\      "components": {
+        \\        "Interactable": {
+        \\          "bounds": [0, 0, 32, 32],
+        \\          "actions": [
+        \\            { "playSound": { "id": "interact", "volume": 0.8 } },
+        \\            { "setEntityActive": { "tag": "collectible", "active": false } }
+        \\          ]
+        \\        }
+        \\      }
+        \\    }
+        \\  ]
+        \\}
+    ;
+
+    const ir = try parseSceneIR(std.testing.allocator, text);
+    const action = ir.entities[0].components[0].Interactable.action;
+    try std.testing.expect(std.meta.activeTag(action) == .Sequence);
+    try std.testing.expect(std.meta.activeTag(action.Sequence[0]) == .PlaySound);
+    try std.testing.expectEqualStrings("interact", action.Sequence[0].PlaySound.id);
+    try std.testing.expect(std.meta.activeTag(action.Sequence[1]) == .SetEntityActive);
+    try std.testing.expectEqualStrings("collectible", action.Sequence[1].SetEntityActive.tag);
+    try std.testing.expect(!action.Sequence[1].SetEntityActive.active);
 }
