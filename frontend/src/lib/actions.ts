@@ -5,7 +5,7 @@ import {
   diagnostics, runtimeDiagnostics, activeBottomTab, activeMainTab,
   selection, selectedPath, rawText, assetRenameName, output, previewRunning,
   runtimeProblems,
-  newProjectTitle, newProjectId, newProjectTemplate,
+  newProjectTitle, newProjectId,
   showCreateScene, showCreateScript, showCreateDialogue,
   newSceneName, newScriptName, newDialogueName, currentScreen
 } from './stores';
@@ -13,7 +13,7 @@ import {
   openProjectFolder, saveProjectFolder, exportWebBundle, startPreview, stopPreview
 } from './previewRuntime';
 import {
-  loadReferenceProject, vfsFromZip, downloadZip, fileFromBytes, readText, writeText
+  vfsFromZip, downloadZip, fileFromBytes, readText, writeText
 } from './vfs';
 import {
   parseProject, validateAll, fatalDiagnostics, parseScene, parseDialogue,
@@ -29,7 +29,6 @@ import {
   setDialogueNodePosition,
   uniqueDialogueId,
 } from './dialogueGraph';
-import { createTemplateProject } from './templates';
 import type { MainTab } from './stores';
 import type { CombatDocument, DialogueChoice, DialogueNode, DialogueNodePosition, ProjectConfig, SceneDocument, SceneEntity, Selection, Vfs } from './types';
 
@@ -277,20 +276,6 @@ export async function closeProjectToProjects() {
   status.set("Choose a project to open.");
 }
 
-// Commands
-export async function loadSample() {
-  if (!confirmDiscardDirty("Load the reference project?")) return;
-  try {
-    const loadedVfs = await loadReferenceProject();
-    openLoadedProject(loadedVfs, {
-      root: "",
-      statusMessage: "Reference project loaded.",
-    });
-  } catch (error) {
-    status.set(messageOf(error));
-  }
-}
-
 export async function openFolder() {
   if (!confirmDiscardDirty("Open another project folder?")) return;
   const root = get(projectRoot).trim();
@@ -480,10 +465,10 @@ export async function importAssets(event: Event) {
 
 export async function createNewProject() {
   if (!confirmDiscardDirty("Create a new project?")) return;
-  const title = get(newProjectTitle).trim() || "Tiny Story";
+  const title = get(newProjectTitle).trim() || "Untitled Game";
   const id = slugify(get(newProjectId) || title);
   try {
-    const importedVfs = await createTemplateProject(id, title, get(newProjectTemplate));
+    const importedVfs = createBlankProject(id, title);
     openLoadedProject(importedVfs, {
       dirtyPaths: importedVfs.keys(),
       root: "",
@@ -492,6 +477,40 @@ export async function createNewProject() {
   } catch (error) {
     status.set(messageOf(error));
   }
+}
+
+function createBlankProject(id: string, title: string): Vfs {
+  let next: Vfs = new Map();
+  const scene: SceneDocument = {
+    name: "start",
+    type: "exploration",
+    size: { width: 800, height: 450 },
+    background: { color: "#1f2933" },
+    entities: [
+      {
+        tag: "main_camera",
+        components: {
+          Transform: { position: [0, 0] },
+          Camera: { offset: [400, 225], zoom: 1 },
+        },
+      },
+    ],
+  };
+  const projectConfig: ProjectConfig = {
+    id,
+    title,
+    version: "0.1.0",
+    entry: { module: "main", class: "Game" },
+    start_scene: "start",
+    scenes: [{ name: "start", path: "assets/scenes/start.json" }],
+    scripts: [{ name: "main", path: "assets/scripts/main.wren" }],
+    window: { width: 800, height: 450, title },
+  };
+
+  next = writeText(next, "game.json", `${JSON.stringify(projectConfig, null, 2)}\n`);
+  next = writeText(next, "assets/scenes/start.json", writeScene(scene));
+  next = writeText(next, "assets/scripts/main.wren", "class Game {\n  static init() {}\n  static update(dt) {}\n}\n");
+  return next;
 }
 
 export function openScriptTab() {

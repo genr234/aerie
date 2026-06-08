@@ -224,7 +224,7 @@
       <div class="tree-empty">
         <p>No files yet.</p>
         <p class="hint">
-          Load the reference project or open a folder to begin.
+          Create a project or open a folder to begin.
         </p>
       </div>
     {/if}

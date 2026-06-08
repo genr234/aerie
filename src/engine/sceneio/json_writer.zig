@@ -232,8 +232,17 @@ fn sceneTypeString(scene_type: types.SceneType) []const u8 {
     };
 }
 
-test "scene JSON writer round trips reference crossroads scene" {
-    const text = @embedFile("../../../assets/reference-game/crossroads.json");
+test "scene JSON writer round trips sprite scene" {
+    const text =
+        \\{
+        \\  "name": "crossroads",
+        \\  "type": "exploration",
+        \\  "size": { "width": 800, "height": 450 },
+        \\  "entities": [
+        \\    { "tag": "player", "components": { "Transform": { "position": [118, 244] }, "Sprite": { "texture": "player.png" } } }
+        \\  ]
+        \\}
+    ;
     const original = try scene_json.parseSceneIR(std.testing.allocator, text);
 
     const encoded = try allocSceneIRJson(std.testing.allocator, original);
@@ -247,11 +256,18 @@ test "scene JSON writer round trips reference crossroads scene" {
     try std.testing.expectEqual(original.entities.len, round_trip.entities.len);
     try std.testing.expectEqualStrings(original.entities[0].tag.?, round_trip.entities[0].tag.?);
     try std.testing.expect(std.meta.activeTag(round_trip.entities[0].components[1]) == .Sprite);
-    try std.testing.expectEqualStrings("reference-game/player.png", round_trip.entities[0].components[1].Sprite.texture);
+    try std.testing.expectEqualStrings("player.png", round_trip.entities[0].components[1].Sprite.texture);
 }
 
-test "scene JSON writer round trips reference clearing scene" {
-    const text = @embedFile("../../../assets/reference-game/clearing.json");
+test "scene JSON writer round trips empty scene" {
+    const text =
+        \\{
+        \\  "name": "clearing",
+        \\  "type": "exploration",
+        \\  "size": { "width": 800, "height": 450 },
+        \\  "entities": []
+        \\}
+    ;
     const original = try scene_json.parseSceneIR(std.testing.allocator, text);
 
     const encoded = try allocSceneIRJson(std.testing.allocator, original);

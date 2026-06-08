@@ -587,11 +587,21 @@ fn dupString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
     return buf;
 }
 
-test "scene parser accepts reference crossroads scene" {
-    const text = @embedFile("../../../assets/reference-game/crossroads.json");
+test "scene parser accepts sprite and trigger scene" {
+    const text =
+        \\{
+        \\  "name": "crossroads",
+        \\  "type": "exploration",
+        \\  "size": { "width": 800, "height": 450 },
+        \\  "entities": [
+        \\    { "tag": "player", "components": { "Transform": { "position": [118, 244] }, "Sprite": { "texture": "player.png" } } },
+        \\    { "tag": "stone_trigger", "components": { "Trigger": { "bounds": [510, 170, 152, 132], "oneShot": true, "action": { "setFlag": { "name": "stone_touched", "value": true } } } } }
+        \\  ]
+        \\}
+    ;
     const ir = try parseSceneIR(std.testing.allocator, text);
     try std.testing.expectEqualStrings("crossroads", ir.name);
-    try std.testing.expectEqual(@as(usize, 6), ir.entities.len);
+    try std.testing.expectEqual(@as(usize, 2), ir.entities.len);
 
     var found_sprite = false;
     var found_trigger = false;
@@ -600,7 +610,7 @@ test "scene parser accepts reference crossroads scene" {
             switch (component) {
                 .Sprite => |sprite| {
                     found_sprite = true;
-                    try std.testing.expectEqualStrings("reference-game/player.png", sprite.texture);
+                    try std.testing.expectEqualStrings("player.png", sprite.texture);
                 },
                 .Trigger => |trigger| {
                     found_trigger = true;
@@ -616,8 +626,15 @@ test "scene parser accepts reference crossroads scene" {
     try std.testing.expect(found_trigger);
 }
 
-test "scene parser accepts reference clearing scene" {
-    const text = @embedFile("../../../assets/reference-game/clearing.json");
+test "scene parser accepts scene dimensions" {
+    const text =
+        \\{
+        \\  "name": "clearing",
+        \\  "type": "exploration",
+        \\  "size": { "width": 800, "height": 450 },
+        \\  "entities": []
+        \\}
+    ;
     const ir = try parseSceneIR(std.testing.allocator, text);
     try std.testing.expectEqualStrings("clearing", ir.name);
     try std.testing.expectEqual(@as(i32, 800), ir.width);

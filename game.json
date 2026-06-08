@@ -1,25 +1,14 @@
 {
-  "id": "lantern-trail",
-  "title": "Lantern Trail",
+  "id": "starter-game",
+  "title": "Starter Game",
   "version": "0.1.0",
   "entry": { "module": "main", "class": "Game" },
-  "start_scene": "crossroads",
+  "start_scene": "start",
   "scenes": [
-    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
-    { "name": "clearing", "path": "assets/reference-game/clearing.json" }
+    { "name": "start", "path": "assets/scenes/start.json" }
   ],
   "scripts": [
     { "name": "main", "path": "assets/scripts/main.wren" }
   ],
-  "combat": { "path": "assets/combat/combat.json" },
-  "audio": {
-    "sounds": [
-      { "id": "interact", "path": "audio/interact.wav" },
-      { "id": "portal", "path": "audio/portal.wav" }
-    ],
-    "music": [
-      { "id": "ambient", "path": "audio/ambient.ogg" }
-    ]
-  },
-  "window": { "width": 800, "height": 450, "title": "Lantern Trail" }
+  "window": { "width": 800, "height": 450, "title": "Starter Game" }
 }

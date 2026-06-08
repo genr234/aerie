@@ -8,7 +8,6 @@
 
   import {
     newProjectId,
-    newProjectTemplate,
     newProjectTitle,
     projectRoot,
     status,
@@ -17,7 +16,6 @@
     chooseProjectFolder,
     createNewProject,
     importZip,
-    loadSample,
     openFolder,
     slugify,
   } from "../lib/actions";
@@ -65,15 +63,6 @@
             <span>Import Zip</span>
             <input type="file" accept=".zip,application/zip" on:change={importZip} />
           </label>
-          <button
-            class="tool-button"
-            on:click={loadSample}
-            title="Load reference"
-            aria-label="Load reference"
-          >
-            <FolderOpen size={16} aria-hidden="true" />
-            <span>Reference</span>
-          </button>
         </div>
       </section>
 
@@ -90,15 +79,6 @@
           <label>
             Project ID
             <input bind:value={$newProjectId} />
-          </label>
-          <label>
-            Template
-            <select bind:value={$newProjectTemplate}>
-              <option value="tiny">Tiny Story</option>
-              <option value="choice">Dialogue Choice</option>
-              <option value="two-room">Two-Room Adventure</option>
-              <option value="blank">Blank Scene</option>
-            </select>
           </label>
         </div>
         <button

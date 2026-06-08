@@ -512,12 +512,12 @@ fn dupString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
 test "project config parses declared scenes and start scene name" {
     const text =
         \\{
-        \\  "id": "reference",
-        \\  "title": "Reference",
-        \\  "start_scene": "crossroads",
+        \\  "id": "starter",
+        \\  "title": "Starter",
+        \\  "start_scene": "start",
         \\  "scenes": [
-        \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
-        \\    { "name": "clearing", "path": "assets/reference-game/clearing.json" }
+        \\    { "name": "start", "path": "assets/scenes/start.json" },
+        \\    { "name": "second", "path": "assets/scenes/second.json" }
         \\  ],
         \\  "scripts": [
         \\    { "name": "main", "path": "assets/scripts/main.wren" }
@@ -530,10 +530,10 @@ test "project config parses declared scenes and start scene name" {
     ;
 
     const cfg = try parseProjectConfigJson(std.testing.allocator, text);
-    try std.testing.expectEqualStrings("crossroads", cfg.start_scene);
+    try std.testing.expectEqualStrings("start", cfg.start_scene);
     try std.testing.expectEqual(@as(usize, 2), cfg.scenes.len);
-    try std.testing.expectEqualStrings("clearing", cfg.scenes[1].name);
-    try std.testing.expectEqualStrings("assets/reference-game/clearing.json", cfg.scenes[1].path);
+    try std.testing.expectEqualStrings("second", cfg.scenes[1].name);
+    try std.testing.expectEqualStrings("assets/scenes/second.json", cfg.scenes[1].path);
     try std.testing.expectEqual(@as(usize, 1), cfg.scripts.len);
     try std.testing.expectEqualStrings("main", cfg.scripts[0].name);
     try std.testing.expectEqualStrings("assets/scripts/main.wren", cfg.scripts[0].path);
@@ -551,8 +551,8 @@ test "project bundle resolves start scene by declared scene name" {
         .{ .name = "clearing", .json = "{}" },
     };
     const cfg = ProjectConfig{
-        .id = "reference",
-        .title = "Reference",
+        .id = "starter",
+        .title = "Starter",
         .start_scene = "clearing",
     };
     const bundle = ProjectBundle{
@@ -568,8 +568,8 @@ test "project bundle resolves start scene by declared scene name" {
 test "project config rejects empty declared scene list" {
     const text =
         \\{
-        \\  "id": "reference",
-        \\  "title": "Reference",
+        \\  "id": "starter",
+        \\  "title": "Starter",
         \\  "start_scene": "crossroads",
         \\  "scenes": []
         \\}
@@ -581,12 +581,12 @@ test "project config rejects empty declared scene list" {
 test "project config rejects duplicate scene names" {
     const text =
         \\{
-        \\  "id": "reference",
-        \\  "title": "Reference",
+        \\  "id": "starter",
+        \\  "title": "Starter",
         \\  "start_scene": "crossroads",
         \\  "scenes": [
-        \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" },
-        \\    { "name": "crossroads", "path": "assets/reference-game/other.json" }
+        \\    { "name": "start", "path": "assets/scenes/start.json" },
+        \\    { "name": "start", "path": "assets/scenes/other.json" }
         \\  ]
         \\}
     ;
@@ -597,8 +597,8 @@ test "project config rejects duplicate scene names" {
 test "project config rejects duplicate script names" {
     const text =
         \\{
-        \\  "id": "reference",
-        \\  "title": "Reference",
+        \\  "id": "starter",
+        \\  "title": "Starter",
         \\  "scripts": [
         \\    { "name": "main", "path": "assets/scripts/main.wren" },
         \\    { "name": "main", "path": "assets/scripts/other.wren" }
@@ -612,11 +612,11 @@ test "project config rejects duplicate script names" {
 test "project config rejects missing declared start scene" {
     const text =
         \\{
-        \\  "id": "reference",
-        \\  "title": "Reference",
+        \\  "id": "starter",
+        \\  "title": "Starter",
         \\  "start_scene": "missing",
         \\  "scenes": [
-        \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" }
+        \\    { "name": "start", "path": "assets/scenes/start.json" }
         \\  ]
         \\}
     ;
@@ -629,8 +629,8 @@ test "project bundle does not fall back when start scene is unresolved" {
         .{ .name = "crossroads", .json = "{}" },
     };
     const cfg = ProjectConfig{
-        .id = "reference",
-        .title = "Reference",
+        .id = "starter",
+        .title = "Starter",
         .start_scene = "missing",
     };
     const bundle = ProjectBundle{
@@ -648,11 +648,11 @@ test "project bundle loads from memory resource provider" {
             .path = "game.json",
             .bytes =
             \\{
-            \\  "id": "memory-reference",
-            \\  "title": "Memory Reference",
-            \\  "start_scene": "crossroads",
+            \\  "id": "memory-starter",
+            \\  "title": "Memory Starter",
+            \\  "start_scene": "start",
             \\  "scenes": [
-            \\    { "name": "crossroads", "path": "assets/reference-game/crossroads.json" }
+            \\    { "name": "start", "path": "assets/scenes/start.json" }
             \\  ],
             \\  "scripts": [
             \\    { "name": "main", "path": "assets/scripts/main.wren" }
@@ -661,7 +661,7 @@ test "project bundle loads from memory resource provider" {
             ,
         },
         .{
-            .path = "assets/reference-game/crossroads.json",
+            .path = "assets/scenes/start.json",
             .bytes = "{\"entities\":[]}",
         },
         .{
@@ -671,14 +671,14 @@ test "project bundle loads from memory resource provider" {
     };
     var provider_state = resources.MemoryResourceProvider{ .entries = &entries };
 
-    const bundle = try loadProjectBundleFromProvider(std.testing.allocator, provider_state.provider(), "memory://reference");
+    const bundle = try loadProjectBundleFromProvider(std.testing.allocator, provider_state.provider(), "memory://starter");
 
-    try std.testing.expectEqualStrings("memory-reference", bundle.config.id);
+    try std.testing.expectEqualStrings("memory-starter", bundle.config.id);
     try std.testing.expectEqual(@as(usize, 1), bundle.scenes.len);
-    try std.testing.expectEqualStrings("crossroads", bundle.scenes[0].name);
+    try std.testing.expectEqualStrings("start", bundle.scenes[0].name);
     try std.testing.expectEqualStrings("{\"entities\":[]}", bundle.scenes[0].json);
     try std.testing.expectEqual(@as(usize, 1), bundle.scripts.len);
     try std.testing.expectEqualStrings("main", bundle.scripts[0].name);
     try std.testing.expectEqualStrings("class Game {}", bundle.scripts[0].source);
-    try std.testing.expectEqualStrings("memory://reference", bundle.asset_root);
+    try std.testing.expectEqualStrings("memory://starter", bundle.asset_root);
 }

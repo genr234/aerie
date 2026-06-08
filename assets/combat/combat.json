@@ -10,37 +10,58 @@
       "attack": 7,
       "defense": 2,
       "speed": 7,
-      "skills": ["fire"]
+      "skills": ["flare", "mend"]
     },
     {
-      "id": "slime",
-      "name": "Slime",
+      "id": "shade",
+      "name": "Shade",
       "side": "enemy",
       "level": 1,
-      "hp": 12,
+      "hp": 14,
+      "mp": 0,
+      "attack": 5,
+      "defense": 1,
+      "speed": 5,
+      "xp": 6
+    },
+    {
+      "id": "lantern_wisp",
+      "name": "Lantern Wisp",
+      "side": "enemy",
+      "level": 1,
+      "hp": 10,
       "mp": 0,
       "attack": 4,
-      "defense": 1,
-      "speed": 4,
-      "xp": 5
+      "defense": 0,
+      "speed": 8,
+      "xp": 4
     }
   ],
   "skills": [
     {
-      "id": "fire",
-      "name": "Fire",
+      "id": "flare",
+      "name": "Flare",
       "kind": "damage",
-      "power": 6,
+      "power": 7,
       "mpCost": 3,
       "target": "enemy",
-      "message": "A bright flame lands."
+      "message": "A stolen flare burns through the dark."
+    },
+    {
+      "id": "mend",
+      "name": "Mend",
+      "kind": "heal",
+      "power": 6,
+      "mpCost": 3,
+      "target": "self",
+      "message": "Warm light closes the wound."
     }
   ],
   "encounters": [
     {
-      "id": "slime_duo",
+      "id": "shade_pair",
       "party": ["hero"],
-      "enemies": ["slime", "slime"],
+      "enemies": ["shade", "lantern_wisp"],
       "rewards": { "xp": 10, "gold": 3 }
     }
   ]

@@ -63,59 +63,6 @@ export function downloadZip(vfs: Vfs, name = 'game-project.zip'): void {
   URL.revokeObjectURL(url);
 }
 
-export async function loadReferenceProject(): Promise<Vfs> {
-  const requiredPaths = [
-    'game.json',
-    'assets/reference-game/crossroads.json',
-    'assets/reference-game/clearing.json',
-    'assets/reference-game/player.png',
-    'assets/scripts/main.wren',
-    'assets/combat/combat.json'
-  ];
-  const optionalPaths = [
-    'assets/audio/interact.wav',
-    'assets/audio/portal.wav',
-    'assets/audio/ambient.ogg'
-  ];
-  const vfs: Vfs = new Map();
-  for (const path of requiredPaths) {
-    const res = await fetch(`/reference/${path}`);
-    if (!res.ok) throw new Error(`Failed to load reference file: ${path}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    vfs.set(path, fileFromBytes(path, bytes));
-  }
-  const loadedOptional = new Set<string>();
-  for (const path of optionalPaths) {
-    const res = await fetch(`/reference/${path}`);
-    if (!res.ok) continue;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    vfs.set(path, fileFromBytes(path, bytes));
-    loadedOptional.add(path);
-  }
-  pruneMissingReferenceAudio(vfs, loadedOptional);
-  return vfs;
-}
-
-function pruneMissingReferenceAudio(vfs: Vfs, loadedOptional: Set<string>): void {
-  const manifest = readText(vfs, 'game.json');
-  if (!manifest) return;
-  try {
-    const project = JSON.parse(manifest);
-    if (!project.audio) return;
-    project.audio.sounds = (project.audio.sounds ?? []).filter((asset: { path?: string }) => loadedOptional.has(audioAssetPath(asset.path)));
-    project.audio.music = (project.audio.music ?? []).filter((asset: { path?: string }) => loadedOptional.has(audioAssetPath(asset.path)));
-    if (project.audio.sounds.length === 0 && project.audio.music.length === 0) delete project.audio;
-    vfs.set('game.json', { path: 'game.json', kind: 'text', text: `${JSON.stringify(project, null, 2)}\n` });
-  } catch {
-    // Keep the original manifest; required reference files already loaded.
-  }
-}
-
-function audioAssetPath(path?: string): string {
-  if (!path) return '';
-  return normalizePath(path.startsWith('assets/') ? path : `assets/${path}`);
-}
-
 export function fileFromBytes(path: string, bytes: Uint8Array): VfsFile {
   const normalized = normalizePath(path);
   if (isTextPath(normalized)) {

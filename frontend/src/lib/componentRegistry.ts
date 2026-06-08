@@ -18,7 +18,7 @@ export const COMPONENT_DEFINITIONS: ComponentDefinition[] = [
     name: "Sprite",
     category: "Rendering",
     description: "Draw an image or sprite sheet frame.",
-    create: () => ({ texture: "reference-game/player.png" }),
+    create: () => ({ texture: "player.png" }),
   },
   {
     name: "Circle",

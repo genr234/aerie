@@ -43,7 +43,7 @@ export const selectedPath = writable<string>("game.json");
 export const rawText = writable<string>("");
 export const activeMainTab = writable<MainTab>("scene");
 export const activeBottomTab = writable<BottomTab>("diagnostics");
-export const status = writable<string>("Load the reference project or open a folder to begin.");
+export const status = writable<string>("Create a project or open a folder to begin.");
 export const previewRunning = writable<boolean>(false);
 export const showGrid = writable<boolean>(true);
 export const panelCollapsed = writable<boolean>(false);
@@ -51,9 +51,8 @@ export const inspectorCollapsed = writable<boolean>(false);
 export const dragState = writable<DragState | undefined>(undefined);
 
 // Modal/Form State
-export const newProjectTitle = writable<string>("Tiny Story");
-export const newProjectId = writable<string>("tiny-story");
-export const newProjectTemplate = writable<"tiny" | "choice" | "two-room" | "blank">("tiny");
+export const newProjectTitle = writable<string>("Untitled Game");
+export const newProjectId = writable<string>("untitled-game");
 
 export const showCreateScene = writable<boolean>(false);
 export const newSceneName = writable<string>("new_scene");
