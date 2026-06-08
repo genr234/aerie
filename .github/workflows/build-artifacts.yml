@@ -87,12 +87,12 @@ jobs:
       - name: Test engine
         run: zig build test --summary all
 
+      - name: Build engine
+        run: zig build -Doptimize=ReleaseFast --summary all
+
       - name: Test Tauri crate
         run: cargo test
         working-directory: src-tauri
-
-      - name: Build engine
-        run: zig build -Doptimize=ReleaseFast --summary all
 
       - name: Build Tauri bundles
         uses: tauri-apps/tauri-action@v0
