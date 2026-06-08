@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "resources": {
+      "../zig-out/bin/game_engine": "game_engine"
+    }
+  }
+}

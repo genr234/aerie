@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "targets": ["appimage", "deb"],
+    "resources": {
+      "../zig-out/bin/game_engine": "game_engine"
+    }
+  }
+}

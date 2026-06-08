@@ -1,0 +1,8 @@
+{
+  "bundle": {
+    "targets": ["nsis", "msi"],
+    "resources": {
+      "../zig-out/bin/game_engine.exe": "game_engine.exe"
+    }
+  }
+}
