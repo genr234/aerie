@@ -53,6 +53,7 @@ export const dragState = writable<DragState | undefined>(undefined);
 // Modal/Form State
 export const newProjectTitle = writable<string>("Untitled Game");
 export const newProjectId = writable<string>("untitled-game");
+export const newProjectTemplate = writable<string>("exploration");
 
 export const showCreateScene = writable<boolean>(false);
 export const newSceneName = writable<string>("new_scene");

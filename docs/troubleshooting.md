@@ -15,3 +15,11 @@ Preview output lines like `[wren:compile] main:12: ...` are mirrored into editor
 ## Missing Assets
 
 Sprite texture paths are resolved relative to `assets/`. The editor reports missing sprite assets as errors and unused image assets as warnings.
+
+## Broken Dialogue Or Combat Actions
+
+Use the structured action pickers when possible. Dialogue actions validate declared dialogue ids and node labels. Combat actions are disabled until the project has a combat database with at least one encounter.
+
+## New Project Feels Empty
+
+Use the starter templates on the Projects screen. The default starter includes a player, camera follow, NPC dialogue, and an ending marker so Play works immediately.

@@ -12,13 +12,13 @@ pub const GameState = struct {
 
     gameDialogue: dialogue.Runner,
     playerTexture: ?rl.Texture2D = null,
-    script: dialogue.Script,
+    dialogueScripts: []dialogue.Script = &.{},
     isTransitioning: bool = false,
 
     vnActive: bool = false,
     vnState: vn.VNState,
     vnDialogue: dialogue.Runner,
-    vnScript: dialogue.Script,
+    vnDialogueScripts: []dialogue.Script = &.{},
 
     storyState: story.StoryState,
     eventQueue: events.EventQueue,

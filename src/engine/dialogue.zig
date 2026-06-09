@@ -312,6 +312,7 @@ fn dupString(allocator: std.mem.Allocator, s: []const u8) ![]const u8 {
 
 pub const Runner = struct {
     script: *const Script,
+    library: []const Script = &.{},
     allocator: std.mem.Allocator,
     context: ?*anyopaque = null,
     index: usize = 0,
@@ -334,6 +335,10 @@ pub const Runner = struct {
             .allocator = allocator,
             .available = std.array_list.Managed(usize).init(allocator),
         };
+    }
+
+    pub fn setLibrary(self: *Runner, scripts: []const Script) void {
+        self.library = scripts;
     }
 
     pub fn initForScene(script: *const Script) Runner {
@@ -367,7 +372,11 @@ pub const Runner = struct {
 
     pub fn startDialogue(self: *Runner, ctx: ?*anyopaque, id: ?[]const u8, label: ?[]const u8) bool {
         if (id) |dialogue_id| {
-            if (!std.mem.eql(u8, dialogue_id, self.script.id)) return false;
+            if (self.findScript(dialogue_id)) |script| {
+                self.script = script;
+            } else {
+                return false;
+            }
         }
         if (label) |target| {
             self.startAt(ctx, target);
@@ -375,6 +384,14 @@ pub const Runner = struct {
             self.start(ctx);
         }
         return true;
+    }
+
+    fn findScript(self: *const Runner, id: []const u8) ?*const Script {
+        if (std.mem.eql(u8, id, self.script.id)) return self.script;
+        for (self.library) |*script| {
+            if (std.mem.eql(u8, id, script.id)) return script;
+        }
+        return null;
     }
 
     pub fn stop(self: *Runner) void {

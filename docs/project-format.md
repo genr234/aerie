@@ -17,7 +17,7 @@ Aerie projects are folders with a `game.json` manifest.
 }
 ```
 
-Audio is optional. Omit `audio` entirely for a silent project. Features such as `Portal` and `Interactable` never require audio assets; sound cues only play when a matching id is declared and loaded. When present, paths are resolved relative to `assets/`.
+Audio is optional. Omit `audio` entirely for a silent project. Features such as `Portal` and `Interactable` never require audio assets; sound cues only play when a matching id is declared and loaded. When present, paths are resolved relative to `assets/`. The editor's asset import button declares `.wav`, `.mp3`, and `.ogg` files automatically under `audio.sounds` or `audio.music`.
 
 ```json
 {
@@ -107,7 +107,7 @@ Combat assets are declared as one JSON file in `game.json`. The file contains `a
 }
 ```
 
-Dialogue assets live under `assets/dialogues/`. The v1 editor format is data-driven:
+Dialogue assets live under `assets/dialogues/`. Multiple dialogue files may be declared; `startDialogue.id` selects the matching dialogue at runtime, and the editor validates ids and node labels before Play or Export. The v1 editor format is data-driven:
 
 ```json
 {
@@ -207,10 +207,12 @@ Scene trigger actions can start dialogue with:
 { "startDialogue": { "id": "intro", "label": "hello" } }
 ```
 
-Omit `id` to use the first dialogue declared in `game.json`.
+Omit `id` to use the first dialogue declared in `game.json`. The editor provides node pickers for declared dialogue files; use raw JSON only for unusual hand-authored cases.
 
 Scene trigger actions can start combat with:
 
 ```json
 { "startCombat": { "encounter": "slime_duo" } }
 ```
+
+The editor can create a starter combat database from the Combat workbench or Explorer toolbar. Scene action editors only enable `startCombat` once at least one encounter exists.

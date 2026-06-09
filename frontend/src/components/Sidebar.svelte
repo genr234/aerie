@@ -7,6 +7,7 @@
     FileCode,
     FileJson,
     Image,
+    Swords,
     ChevronRight,
   } from "@lucide/svelte";
   import {
@@ -22,7 +23,7 @@
     combatDecl,
     paths,
   } from "../lib/stores";
-  import { selectScene, selectFile, selectCombat } from "../lib/actions";
+  import { createCombatData, selectScene, selectFile, selectCombat } from "../lib/actions";
 
   interface TreeNode {
     name: string;
@@ -189,6 +190,12 @@
         on:click={() => ($showCreateDialogue = true)}
         disabled={!canCreate()}
         title="New dialogue"><Plus size={14} /><span>Dialogue</span></button
+      >
+      <button
+        class="tool-button"
+        on:click={() => createCombatData()}
+        disabled={!canCreate() || Boolean($combatDecl)}
+        title="New combat data"><Swords size={14} /><span>Combat</span></button
       >
     </div>
   </div>

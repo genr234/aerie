@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { ArrowLeftToLine, ArrowRightToLine, Copy, Trash2, Plus, PanelRightOpen, PanelRightClose } from "@lucide/svelte";
-  import { selection, vfs, paths, sceneDecls, dialogueDecls } from "../lib/stores";
+  import { combatDecl, selection, vfs, paths, sceneDecls, dialogueDecls } from "../lib/stores";
   import {
     moveSelectedEntity, duplicateEntity, deleteEntity, updateEntityTag,
     addComponent, removeComponent, updateComponent,
@@ -9,7 +9,7 @@
     array2, array4, numberOf
   } from "../lib/actions";
   import { COMPONENT_CATEGORIES, componentsForCategory } from "../lib/componentRegistry";
-  import { parseScene } from "../lib/project";
+  import { parseCombat, parseDialogue, parseScene } from "../lib/project";
   import type { SceneEntity } from "../lib/types";
 
   export let collapsed = false;
@@ -21,6 +21,7 @@
   $: selectedEntity = selectedScene && $selection.type !== "file" ? selectedScene.entities[$selection.entityIndex] : undefined;
   $: selectedComponentName = $selection.type === "component" ? $selection.component : undefined;
   $: assetPaths = $paths.filter((path) => path.startsWith("assets/") && /\.(png|jpg|jpeg)$/i.test(path));
+  $: combatEncounters = $combatDecl?.path ? parseCombat($vfs, $combatDecl.path).combat?.encounters ?? [] : [];
   $: entityKey = $selection.type !== "file" ? `${$selection.scenePath}:${$selection.entityIndex}` : null;
   $: componentToAdd = firstAvailableComponent(selectedEntity);
 
@@ -92,6 +93,25 @@
     const action = current.action as any;
     const dialogue = action?.startDialogue ?? {};
     updateAction(component, { startDialogue: { ...dialogue, [field]: value || undefined } });
+  }
+
+  function dialogueNodeOptions(action: any) {
+    const id = startDialogueId(action) || $dialogueDecls[0]?.name;
+    const decl = $dialogueDecls.find((dialogue) => dialogue.name === id);
+    if (!decl) return [];
+    return parseDialogue($vfs, decl.path).dialogue?.nodes ?? [];
+  }
+
+  function startCombatAction() {
+    return { startCombat: { encounter: combatEncounters[0]?.id ?? "" } };
+  }
+
+  function isStartCombatAction(action: any) {
+    return Boolean(action && typeof action === "object" && action.startCombat);
+  }
+
+  function updateCombatActionEncounter(component: "Trigger" | "Interactable", value: string) {
+    updateAction(component, { startCombat: { encounter: value } });
   }
 </script>
 
@@ -645,7 +665,10 @@
                 <button on:click={() => updateAction("Interactable", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button>
                 <button on:click={() => updateAction("Interactable", { setFlag: { name: "flag", value: true } })}>setFlag</button>
                 <button on:click={() => updateAction("Interactable", { startDialogue: {} })}>startDialogue</button>
-                <button on:click={() => updateAction("Interactable", { startCombat: { encounter: "slime_duo" } })}>startCombat</button>
+                <button
+                  disabled={combatEncounters.length === 0}
+                  title={combatEncounters.length === 0 ? "Create a combat encounter first" : "Start combat"}
+                  on:click={() => updateAction("Interactable", startCombatAction())}>startCombat</button>
               </div>
               {#if isStartDialogueAction(interactable.action)}
                 <label
@@ -658,7 +681,23 @@
                   </select>
                 </label>
                 <label
-                  >Dialogue Label <input value={startDialogueLabel(interactable.action)} on:change={(event) => updateDialogueActionField("Interactable", "label", event.currentTarget.value)} /></label
+                  >Dialogue Node
+                  <select value={startDialogueLabel(interactable.action)} on:change={(event) => updateDialogueActionField("Interactable", "label", event.currentTarget.value)}>
+                    <option value="">Start node</option>
+                    {#each dialogueNodeOptions(interactable.action) as node}
+                      <option value={node.id}>{node.id}</option>
+                    {/each}
+                  </select></label
+                >
+              {/if}
+              {#if isStartCombatAction(interactable.action)}
+                <label
+                  >Encounter
+                  <select value={interactable.action.startCombat?.encounter ?? ""} on:change={(event) => updateCombatActionEncounter("Interactable", event.currentTarget.value)}>
+                    {#each combatEncounters as encounter}
+                      <option value={encounter.id}>{encounter.id}</option>
+                    {/each}
+                  </select></label
                 >
               {/if}
               <label
@@ -818,7 +857,9 @@
                   >startDialogue</button
                 >
                 <button
-                  on:click={() => updateAction("Trigger", { startCombat: { encounter: "slime_duo" } })}
+                  disabled={combatEncounters.length === 0}
+                  title={combatEncounters.length === 0 ? "Create a combat encounter first" : "Start combat"}
+                  on:click={() => updateAction("Trigger", startCombatAction())}
                   >startCombat</button
                 >
               </div>
@@ -837,11 +878,27 @@
                   </select>
                 </label>
                 <label
-                  >Dialogue Label <input
+                  >Dialogue Node
+                  <select
                     value={startDialogueLabel(trigger.action)}
                     on:change={(event) =>
                       updateDialogueActionField("Trigger", "label", event.currentTarget.value)}
-                  /></label
+                  >
+                    <option value="">Start node</option>
+                    {#each dialogueNodeOptions(trigger.action) as node}
+                      <option value={node.id}>{node.id}</option>
+                    {/each}
+                  </select></label
+                >
+              {/if}
+              {#if isStartCombatAction(trigger.action)}
+                <label
+                  >Encounter
+                  <select value={trigger.action.startCombat?.encounter ?? ""} on:change={(event) => updateCombatActionEncounter("Trigger", event.currentTarget.value)}>
+                    {#each combatEncounters as encounter}
+                      <option value={encounter.id}>{encounter.id}</option>
+                    {/each}
+                  </select></label
                 >
               {/if}
               <label

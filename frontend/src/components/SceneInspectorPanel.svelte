@@ -16,7 +16,8 @@
     updateEntityTag,
   } from "../lib/actions";
   import { COMPONENT_CATEGORIES, componentsForCategory } from "../lib/componentRegistry";
-  import { selection, paths, sceneDecls, dialogueDecls } from "../lib/stores";
+  import { combatDecl, selection, paths, sceneDecls, dialogueDecls, vfs } from "../lib/stores";
+  import { parseCombat, parseDialogue } from "../lib/project";
   import type { SceneDocument, SceneEntity } from "../lib/types";
 
   let { scene, scenePath }: { scene: SceneDocument; scenePath: string } = $props();
@@ -27,6 +28,7 @@
   let selectedIndex = $derived(selected[0]);
   let selectedEntity = $derived(selected.length === 1 ? scene.entities[selectedIndex] : undefined);
   let assetPaths = $derived($paths.filter((path) => path.startsWith("assets/") && /\.(png|jpg|jpeg)$/i.test(path)));
+  let combatEncounters = $derived($combatDecl?.path ? parseCombat($vfs, $combatDecl.path).combat?.encounters ?? [] : []);
 
   $effect(() => {
     componentToAdd = firstAvailableComponent(selectedEntity);
@@ -104,6 +106,25 @@
     const action = current.action as any;
     const dialogue = action?.startDialogue ?? {};
     updateAction(component, { startDialogue: { ...dialogue, [field]: value || undefined } });
+  }
+
+  function dialogueNodeOptions(action: any) {
+    const id = startDialogueId(action) || $dialogueDecls[0]?.name;
+    const decl = $dialogueDecls.find((dialogue) => dialogue.name === id);
+    if (!decl) return [];
+    return parseDialogue($vfs, decl.path).dialogue?.nodes ?? [];
+  }
+
+  function startCombatAction() {
+    return { startCombat: { encounter: combatEncounters[0]?.id ?? "" } };
+  }
+
+  function isStartCombatAction(action: any) {
+    return Boolean(action && typeof action === "object" && action.startCombat);
+  }
+
+  function updateCombatActionEncounter(component: "Trigger" | "Interactable", value: string) {
+    updateAction(component, { startCombat: { encounter: value } });
   }
 
   function updateJsonField(component: string, field: string, text: string, fallback: unknown) {
@@ -223,10 +244,13 @@
                 <label>Width <input type="number" value={bounds[2]} onchange={(event) => updateSimple("Trigger", { bounds: [bounds[0], bounds[1], Number(event.currentTarget.value), bounds[3]] })} /></label>
                 <label>Height <input type="number" value={bounds[3]} onchange={(event) => updateSimple("Trigger", { bounds: [bounds[0], bounds[1], bounds[2], Number(event.currentTarget.value)] })} /></label>
                 <label><input type="checkbox" checked={Boolean(data.oneShot)} onchange={(event) => updateSimple("Trigger", { oneShot: event.currentTarget.checked })} /> One shot</label>
-                <div class="action-buttons"><button type="button" onclick={() => updateAction("Trigger", { showMessage: { text: "Hello", duration: 2 } })}>showMessage</button><button type="button" onclick={() => updateAction("Trigger", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button><button type="button" onclick={() => updateAction("Trigger", { setFlag: { name: "flag", value: true } })}>setFlag</button><button type="button" onclick={() => updateAction("Trigger", { startDialogue: {} })}>startDialogue</button><button type="button" onclick={() => updateAction("Trigger", { startCombat: { encounter: "slime_duo" } })}>startCombat</button></div>
+                <div class="action-buttons"><button type="button" onclick={() => updateAction("Trigger", { showMessage: { text: "Hello", duration: 2 } })}>showMessage</button><button type="button" onclick={() => updateAction("Trigger", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button><button type="button" onclick={() => updateAction("Trigger", { setFlag: { name: "flag", value: true } })}>setFlag</button><button type="button" onclick={() => updateAction("Trigger", { startDialogue: {} })}>startDialogue</button><button type="button" disabled={combatEncounters.length === 0} title={combatEncounters.length === 0 ? "Create a combat encounter first" : "Start combat"} onclick={() => updateAction("Trigger", startCombatAction())}>startCombat</button></div>
                 {#if isStartDialogueAction(data.action)}
                   <label>Dialogue <select value={startDialogueId(data.action)} onchange={(event) => updateDialogueActionField("Trigger", "id", event.currentTarget.value)}><option value="">First declared dialogue</option>{#each $dialogueDecls as dialogue}<option value={dialogue.name}>{dialogue.name}</option>{/each}</select></label>
-                  <label>Dialogue Label <input value={startDialogueLabel(data.action)} onchange={(event) => updateDialogueActionField("Trigger", "label", event.currentTarget.value)} /></label>
+                  <label>Dialogue Node <select value={startDialogueLabel(data.action)} onchange={(event) => updateDialogueActionField("Trigger", "label", event.currentTarget.value)}><option value="">Start node</option>{#each dialogueNodeOptions(data.action) as node}<option value={node.id}>{node.id}</option>{/each}</select></label>
+                {/if}
+                {#if isStartCombatAction(data.action)}
+                  <label>Encounter <select value={String(data.action.startCombat?.encounter ?? "")} onchange={(event) => updateCombatActionEncounter("Trigger", event.currentTarget.value)}>{#each combatEncounters as encounter}<option value={encounter.id}>{encounter.id}</option>{/each}</select></label>
                 {/if}
                 <label>Action JSON <textarea rows="4" value={actionJson("Trigger")} onchange={(event) => updateActionsJson("Trigger", event.currentTarget.value)}></textarea></label>
               {:else if component === "Interactable"}
@@ -237,10 +261,13 @@
                 <label>Height <input type="number" value={bounds[3]} onchange={(event) => updateSimple("Interactable", { bounds: [bounds[0], bounds[1], bounds[2], Number(event.currentTarget.value)] })} /></label>
                 <label>Prompt <input value={String(data.prompt ?? "")} onchange={(event) => updateSimple("Interactable", { prompt: event.currentTarget.value || undefined })} /></label>
                 <label><input type="checkbox" checked={data.repeatable !== false} onchange={(event) => updateSimple("Interactable", { repeatable: event.currentTarget.checked })} /> Repeatable</label>
-                <div class="action-buttons"><button type="button" onclick={() => updateAction("Interactable", { showMessage: { text: "Hello", duration: 2 } })}>showMessage</button><button type="button" onclick={() => updateAction("Interactable", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button><button type="button" onclick={() => updateAction("Interactable", { setFlag: { name: "flag", value: true } })}>setFlag</button><button type="button" onclick={() => updateAction("Interactable", { startDialogue: {} })}>startDialogue</button><button type="button" onclick={() => updateAction("Interactable", { startCombat: { encounter: "slime_duo" } })}>startCombat</button></div>
+                <div class="action-buttons"><button type="button" onclick={() => updateAction("Interactable", { showMessage: { text: "Hello", duration: 2 } })}>showMessage</button><button type="button" onclick={() => updateAction("Interactable", { changeScene: { name: $sceneDecls[0]?.name ?? "" } })}>changeScene</button><button type="button" onclick={() => updateAction("Interactable", { setFlag: { name: "flag", value: true } })}>setFlag</button><button type="button" onclick={() => updateAction("Interactable", { startDialogue: {} })}>startDialogue</button><button type="button" disabled={combatEncounters.length === 0} title={combatEncounters.length === 0 ? "Create a combat encounter first" : "Start combat"} onclick={() => updateAction("Interactable", startCombatAction())}>startCombat</button></div>
                 {#if isStartDialogueAction(data.action)}
                   <label>Dialogue <select value={startDialogueId(data.action)} onchange={(event) => updateDialogueActionField("Interactable", "id", event.currentTarget.value)}><option value="">First declared dialogue</option>{#each $dialogueDecls as dialogue}<option value={dialogue.name}>{dialogue.name}</option>{/each}</select></label>
-                  <label>Dialogue Label <input value={startDialogueLabel(data.action)} onchange={(event) => updateDialogueActionField("Interactable", "label", event.currentTarget.value)} /></label>
+                  <label>Dialogue Node <select value={startDialogueLabel(data.action)} onchange={(event) => updateDialogueActionField("Interactable", "label", event.currentTarget.value)}><option value="">Start node</option>{#each dialogueNodeOptions(data.action) as node}<option value={node.id}>{node.id}</option>{/each}</select></label>
+                {/if}
+                {#if isStartCombatAction(data.action)}
+                  <label>Encounter <select value={String(data.action.startCombat?.encounter ?? "")} onchange={(event) => updateCombatActionEncounter("Interactable", event.currentTarget.value)}>{#each combatEncounters as encounter}<option value={encounter.id}>{encounter.id}</option>{/each}</select></label>
                 {/if}
                 <label>Action JSON <textarea rows="4" value={actionJson("Interactable")} onchange={(event) => updateActionsJson("Interactable", event.currentTarget.value)}></textarea></label>
               {:else if component === "Portal"}

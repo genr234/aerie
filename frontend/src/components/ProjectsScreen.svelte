@@ -8,6 +8,7 @@
 
   import {
     newProjectId,
+    newProjectTemplate,
     newProjectTitle,
     projectRoot,
     status,
@@ -79,6 +80,15 @@
           <label>
             Project ID
             <input bind:value={$newProjectId} />
+          </label>
+          <label>
+            Template
+            <select bind:value={$newProjectTemplate}>
+              <option value="exploration">Exploration Starter</option>
+              <option value="visual_novel">Visual Novel Starter</option>
+              <option value="combat">Combat Starter</option>
+              <option value="empty">Sandbox Starter</option>
+            </select>
           </label>
         </div>
         <button

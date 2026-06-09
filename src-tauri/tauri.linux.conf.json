@@ -2,7 +2,14 @@
   "bundle": {
     "targets": ["appimage", "deb"],
     "resources": {
-      "../zig-out/bin/game_engine": "game_engine"
+      "../zig-out/bin/game_engine": "game_engine",
+      "../build.zig": "build.zig",
+      "../build.zig.zon": "build.zig.zon",
+      "../src/main.zig": "src/main.zig",
+      "../src/root.zig": "src/root.zig",
+      "../src/engine": "src/engine",
+      "../src/third-party/wren/src": "src/third-party/wren/src",
+      "../web": "web"
     }
   }
 }

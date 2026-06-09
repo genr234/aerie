@@ -1,18 +1,31 @@
 <script lang="ts">
   import { createEventDispatcher } from "svelte";
   import { ChevronUp, ChevronDown, Copy } from "@lucide/svelte";
-  import { activeBottomTab, diagnostics, output, runtimeProblems } from "../lib/stores";
-  import { repairDiagnostic, selectFile } from "../lib/actions";
+  import {
+    activeBottomTab,
+    combatDecl,
+    dialogueDecls,
+    diagnostics,
+    output,
+    runtimeProblems,
+    sceneDecls,
+  } from "../lib/stores";
+  import { repairDiagnostic, selectCombat, selectFile, selectScene } from "../lib/actions";
   import type { Diagnostic } from "../lib/types";
 
   export let collapsed = false;
   const dispatch = createEventDispatcher<{ toggleCollapse: void }>();
 
   function navigateDiagnostic(diagnostic: Diagnostic) {
-    selectFile(
-      diagnostic.path,
-      diagnostic.path.endsWith(".json") ? "scene" : "raw",
-    );
+    if ($sceneDecls.some((scene) => scene.path === diagnostic.path)) {
+      selectScene(diagnostic.path);
+    } else if ($dialogueDecls.some((dialogue) => dialogue.path === diagnostic.path)) {
+      selectFile(diagnostic.path, "dialogue");
+    } else if ($combatDecl?.path === diagnostic.path) {
+      selectCombat(diagnostic.path);
+    } else {
+      selectFile(diagnostic.path, diagnostic.path.endsWith(".wren") ? "script" : "raw");
+    }
   }
 
   async function copyText(text: string) {

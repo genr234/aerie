@@ -30,7 +30,10 @@
       "../zig-out/bin/game_engine",
       "../build.zig",
       "../build.zig.zon",
-      "../src",
+      "../src/main.zig",
+      "../src/root.zig",
+      "../src/engine",
+      "../src/third-party/wren/src",
       "../web",
       "../.tools/zig-aarch64-macos-0.16.0"
     ]

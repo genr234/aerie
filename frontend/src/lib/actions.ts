@@ -6,6 +6,7 @@ import {
   selection, selectedPath, rawText, assetRenameName, output, previewRunning,
   runtimeProblems,
   newProjectTitle, newProjectId,
+  newProjectTemplate,
   showCreateScene, showCreateScript, showCreateDialogue,
   newSceneName, newScriptName, newDialogueName, currentScreen
 } from './stores';
@@ -38,6 +39,10 @@ type OpenLoadedProjectOptions = {
   statusMessage: string;
 };
 
+type SelectOptions = {
+  autosave?: boolean;
+};
+
 export function refreshProject() {
   const currentVfs = get(vfs);
   const parsed = parseProject(currentVfs);
@@ -51,8 +56,10 @@ export function markDirty(path: string) {
 
 export function selectFile(
   path: string,
-  tab?: MainTab
+  tab?: MainTab,
+  options: SelectOptions = {}
 ) {
+  if (options.autosave ?? true) flushActiveEditorBuffer();
   const currentTab = get(activeMainTab);
   const finalTab = tab ?? (path.endsWith(".wren")
     ? "script"
@@ -69,14 +76,16 @@ export function selectFile(
   activeMainTab.set(finalTab);
 }
 
-export function selectScene(path: string) {
+export function selectScene(path: string, options: SelectOptions = {}) {
+  if (options.autosave ?? true) flushActiveEditorBuffer();
   selectedPath.set(path);
   rawText.set(readText(get(vfs), path) ?? "");
   selection.set({ type: "file", path });
   activeMainTab.set("scene");
 }
 
-export function selectCombat(path: string) {
+export function selectCombat(path: string, options: SelectOptions = {}) {
+  if (options.autosave ?? true) flushActiveEditorBuffer();
   selectedPath.set(path);
   rawText.set(readText(get(vfs), path) ?? "");
   selection.set({ type: "file", path });
@@ -136,6 +145,45 @@ export function repairDiagnostic(diagnostic: { path: string; message: string }) 
       combat.encounters[index].enemies = combat.encounters[index].enemies.filter((id) => id !== actorId);
       repaired = true;
     });
+  }
+
+  if (message === "Scene has no entity tagged 'player'") {
+    mutateScene(diagnostic.path, (scene) => {
+      scene.entities = [...(scene.entities ?? []), {
+        tag: "player",
+        components: {
+          Transform: { position: [96, 260], scale: [1, 1], rotation: 0 },
+          Rect: { width: 28, height: 38, color: "#5b7fdb" },
+          Layer: { order: 20, ySort: true },
+          PlayerController: { speed: 130, mode: "smooth8" },
+          BoxCollider: { width: 22, height: 24, offset: [3, 12] },
+        },
+      }];
+      repaired = true;
+    });
+  }
+
+  if (message === "Scene has no Camera component") {
+    mutateScene(diagnostic.path, (scene) => {
+      scene.entities = [...(scene.entities ?? []), {
+        tag: "main_camera",
+        components: {
+          Transform: { position: [0, 0] },
+          Camera: { offset: [400, 225], zoom: 1, followTag: "player", clampToScene: true, smoothing: 8 },
+        },
+      }];
+      repaired = true;
+    });
+  }
+
+  if (message === "Missing combat file") {
+    createCombatData(diagnostic.path);
+    repaired = true;
+  }
+
+  if (/ starts dialogue but no dialogues are declared$/.test(message)) {
+    createDefaultDialogue();
+    repaired = true;
   }
 
   status.set(repaired ? "Repaired diagnostic." : "No automatic repair is available for that diagnostic.");
@@ -243,7 +291,9 @@ export function openLoadedProject(loadedVfs: Vfs, options: OpenLoadedProjectOpti
   if (options.root !== undefined) projectRoot.set(options.root);
   refreshProject();
   const p = get(project);
-  selectScene((p?.scenes ?? [])[0]?.path ?? "game.json");
+  const firstScene = (p?.scenes ?? [])[0]?.path;
+  if (firstScene) selectScene(firstScene, { autosave: false });
+  else selectFile("game.json", "raw", { autosave: false });
   currentScreen.set("editor");
   status.set(options.statusMessage);
 }
@@ -442,15 +492,34 @@ export async function importAssets(event: Event) {
   try {
     let next = get(vfs);
     const added: string[] = [];
+    const sounds: Array<{ id: string; path: string }> = [];
+    const music: Array<{ id: string; path: string }> = [];
     for (const file of files) {
-      if (!/\.(png|jpg|jpeg)$/i.test(file.name)) continue;
-      const path = uniqueAssetPath(`assets/imports/${file.name}`, next);
+      const isImage = /\.(png|jpg|jpeg)$/i.test(file.name);
+      const isAudio = /\.(wav|ogg|mp3)$/i.test(file.name);
+      if (!isImage && !isAudio) continue;
+      const path = uniqueAssetPath(`${isAudio ? "assets/audio" : "assets/imports"}/${file.name}`, next);
       const bytes = new Uint8Array(await file.arrayBuffer());
       next = new Map(next).set(path, fileFromBytes(path, bytes));
       added.push(path);
+      if (isAudio) {
+        const id = slugify(file.name.replace(/\.[^.]+$/, "")).replaceAll("-", "_");
+        const entry = { id, path: path.replace(/^assets\//, "") };
+        if (/\.ogg$/i.test(file.name)) music.push(entry);
+        else sounds.push(entry);
+      }
     }
     if (added.length) recordHistory();
     vfs.set(next);
+    if (sounds.length || music.length) {
+      mutateProject((config) => {
+        config.audio = {
+          ...(config.audio ?? {}),
+          sounds: [...(config.audio?.sounds ?? []), ...sounds],
+          music: [...(config.audio?.music ?? []), ...music],
+        };
+      }, false);
+    }
     dirty.update(d => new Set([...d, ...added]));
     refreshProject();
     status.set(added.length
@@ -467,8 +536,9 @@ export async function createNewProject() {
   if (!confirmDiscardDirty("Create a new project?")) return;
   const title = get(newProjectTitle).trim() || "Untitled Game";
   const id = slugify(get(newProjectId) || title);
+  const template = get(newProjectTemplate);
   try {
-    const importedVfs = createBlankProject(id, title);
+    const importedVfs = createBlankProject(id, title, template);
     openLoadedProject(importedVfs, {
       dirtyPaths: importedVfs.keys(),
       root: "",
@@ -479,21 +549,81 @@ export async function createNewProject() {
   }
 }
 
-export function createBlankProject(id: string, title: string): Vfs {
+export function createBlankProject(id: string, title: string, template = "exploration"): Vfs {
   let next: Vfs = new Map();
   const scene: SceneDocument = {
     name: "start",
     type: "exploration",
     size: { width: 800, height: 450 },
-    background: { color: "#1f2933" },
+    background: { color: template === "visual_novel" ? "#171923" : "#1f2933" },
     entities: [
+      {
+        tag: "player",
+        components: {
+          Transform: { position: [96, 260], scale: [1, 1], rotation: 0 },
+          Rect: { width: 28, height: 38, color: "#5b7fdb" },
+          Layer: { order: 20, ySort: true },
+          PlayerController: { speed: 130, mode: "smooth8" },
+          BoxCollider: { width: 22, height: 24, offset: [3, 12] },
+        },
+      },
       {
         tag: "main_camera",
         components: {
           Transform: { position: [0, 0] },
-          Camera: { offset: [400, 225], zoom: 1 },
+          Camera: { offset: [400, 225], zoom: 1, followTag: "player", clampToScene: true, smoothing: 8 },
         },
       },
+      {
+        tag: "guide",
+        components: {
+          Transform: { position: [320, 250], scale: [1, 1], rotation: 0 },
+          Rect: { width: 34, height: 48, color: "#6c7481" },
+          Layer: { order: 20, ySort: true },
+          BoxCollider: { width: 28, height: 36, offset: [3, 12] },
+          Solid: { enabled: true },
+          Interactable: {
+            bounds: [294, 226, 86, 82],
+            prompt: "Talk",
+            repeatable: true,
+            action: { startDialogue: { id: "intro", label: "hello" } },
+          },
+        },
+      },
+      {
+        tag: "ending_marker",
+        components: {
+          Transform: { position: [672, 246], scale: [1, 1], rotation: 0 },
+          Rect: { width: 52, height: 52, color: "#79a86b" },
+          Layer: { order: 5, ySort: true },
+          Trigger: {
+            bounds: [660, 234, 76, 76],
+            oneShot: true,
+            actions: [
+              { showMessage: { text: "You reached the end of the tiny starter game.", duration: 3 } },
+              { setFlag: { name: "ending_reached", value: true } },
+            ],
+          },
+        },
+      },
+    ],
+  };
+  const dialogue = {
+    id: "intro",
+    start: "hello",
+    nodes: [
+      { id: "hello", speaker: "Guide", text: "Welcome. Walk to the green marker when you are ready.", next: "choice" },
+      {
+        id: "choice",
+        speaker: "Guide",
+        text: "Need anything before you go?",
+        choices: [
+          { text: "Mark this place", next: "marked", actions: [{ setFlag: { name: "guide_met", value: true } }] },
+          { text: "I am ready", next: "bye" },
+        ],
+      },
+      { id: "marked", speaker: "Guide", text: "Done. The world remembers you were here." },
+      { id: "bye", speaker: "Guide", text: "Then go on." },
     ],
   };
   const projectConfig: ProjectConfig = {
@@ -504,11 +634,28 @@ export function createBlankProject(id: string, title: string): Vfs {
     start_scene: "start",
     scenes: [{ name: "start", path: "assets/scenes/start.json" }],
     scripts: [{ name: "main", path: "assets/scripts/main.wren" }],
+    dialogues: [{ name: "intro", path: "assets/dialogues/intro.json" }],
+    combat: template === "combat" ? { path: "assets/combat/combat.json" } : undefined,
     window: { width: 800, height: 450, title },
   };
 
   next = writeText(next, "game.json", `${JSON.stringify(projectConfig, null, 2)}\n`);
   next = writeText(next, "assets/scenes/start.json", writeScene(scene));
+  next = writeText(next, "assets/dialogues/intro.json", writeDialogue(dialogue));
+  if (template === "combat") {
+    next = writeText(next, "assets/combat/combat.json", writeCombat({
+      actors: [
+        { id: "hero", name: "Hero", side: "party", level: 1, hp: 20, mp: 4, attack: 5, defense: 2, speed: 6, skills: ["strike"] },
+        { id: "slime", name: "Slime", side: "enemy", level: 1, hp: 10, mp: 0, attack: 3, defense: 1, speed: 3, skills: [] },
+      ],
+      skills: [
+        { id: "strike", name: "Strike", kind: "damage", power: 4, mpCost: 0, target: "enemy" },
+      ],
+      encounters: [
+        { id: "first_battle", party: ["hero"], enemies: ["slime"], rewards: { xp: 5, gold: 1 } },
+      ],
+    }));
+  }
   next = writeText(next, "assets/scripts/main.wren", "import \"engine/api\" for Events\n\nclass Game {\n  static onBoot() {\n    Events.message(\"Welcome to your new game.\", 2)\n  }\n\n  static onUpdate(dt) {}\n}\n");
   return next;
 }
@@ -1018,6 +1165,50 @@ export function createDialogue() {
   showCreateDialogue.set(false);
   newDialogueName.set("new_dialogue");
   selectFile(path, "dialogue");
+}
+
+export function createCombatData(preferredPath?: string) {
+  const path = preferredPath && !get(vfs).has(preferredPath)
+    ? preferredPath
+    : uniqueAssetPath("assets/combat/combat.json", get(vfs));
+  const combat: CombatDocument = {
+    actors: [
+      { id: "hero", name: "Hero", side: "party", level: 1, hp: 20, mp: 4, attack: 5, defense: 2, speed: 6, skills: ["strike"] },
+      { id: "slime", name: "Slime", side: "enemy", level: 1, hp: 10, mp: 0, attack: 3, defense: 1, speed: 3, skills: [] },
+    ],
+    skills: [
+      { id: "strike", name: "Strike", kind: "damage", power: 4, mpCost: 0, target: "enemy" },
+    ],
+    encounters: [
+      { id: "first_battle", party: ["hero"], enemies: ["slime"], rewards: { xp: 5, gold: 1 } },
+    ],
+  };
+
+  recordHistory();
+  vfs.set(writeText(get(vfs), path, writeCombat(combat)));
+  mutateProject((config) => {
+    config.combat = { path };
+  }, false);
+  markDirty(path);
+  selectCombat(path);
+}
+
+function createDefaultDialogue() {
+  const path = uniqueAssetPath("assets/dialogues/intro.json", get(vfs));
+  const name = path.split("/").pop()?.replace(/\.json$/, "") ?? "intro";
+  const dialogue = {
+    id: name,
+    start: "start",
+    nodes: [{ id: "start", speaker: "", text: "Hello." }],
+  };
+
+  recordHistory();
+  vfs.set(writeText(get(vfs), path, writeDialogue(dialogue)));
+  mutateProject((config) => {
+    config.dialogues = [...(config.dialogues ?? []), { name, path }];
+  }, false);
+  markDirty(path);
+  refreshProject();
 }
 
 export function updateDialogueField(field: string, value: unknown) {

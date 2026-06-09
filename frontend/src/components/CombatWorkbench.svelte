@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Plus, Trash2 } from "@lucide/svelte";
   import { combatDecl, vfs } from "../lib/stores";
-  import { mutateCombat } from "../lib/actions";
+  import { createCombatData, mutateCombat } from "../lib/actions";
   import { parseCombat } from "../lib/project";
 
   $: combatPath = $combatDecl?.path;
@@ -111,6 +111,7 @@
     <div class="empty-state">
       <h2>No combat file</h2>
       <p>Add <code>{combatDeclExample}</code> to game.json.</p>
+      <button class="tool-button primary" on:click={() => createCombatData()}><Plus size={14} />Create combat data</button>
     </div>
   {:else if !combat}
     <div class="empty-state">

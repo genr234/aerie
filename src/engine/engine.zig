@@ -83,25 +83,13 @@ pub const Engine = struct {
             combat.Database.empty();
         self.gameState.combatState = combat.BattleState.init(combat_db, &self.gameState.storyState);
 
-        if (bundle.dialogues.len > 0) {
-            self.gameState.script = try dialogue.parseScriptJson(mem.permanent(), bundle.dialogues[0].source);
-        } else {
-            var builder = dialogue.Builder.init(mem.permanent());
-            defer builder.deinit();
-            _ = builder.done();
-            self.gameState.script = try builder.build();
-        }
-        self.gameState.gameDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.script);
+        self.gameState.dialogueScripts = try loadDialogueScripts(bundle);
+        self.gameState.gameDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.dialogueScripts[0]);
+        self.gameState.gameDialogue.setLibrary(self.gameState.dialogueScripts);
 
-        if (bundle.dialogues.len > 0) {
-            self.gameState.vnScript = try dialogue.parseScriptJson(mem.permanent(), bundle.dialogues[0].source);
-        } else {
-            var vnBuilder = dialogue.Builder.init(mem.permanent());
-            defer vnBuilder.deinit();
-            _ = vnBuilder.done();
-            self.gameState.vnScript = try vnBuilder.build();
-        }
-        self.gameState.vnDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.vnScript);
+        self.gameState.vnDialogueScripts = try loadDialogueScripts(bundle);
+        self.gameState.vnDialogue = dialogue.Runner.init(mem.scene(), &self.gameState.vnDialogueScripts[0]);
+        self.gameState.vnDialogue.setLibrary(self.gameState.vnDialogueScripts);
 
         self.gameState.vnState = vn.VNState.init(screenWidth, screenHeight);
         self.gameState.vnState.setDialogueRunner(&self.gameState.vnDialogue);
@@ -204,6 +192,24 @@ pub const Engine = struct {
         return true;
     }
 
+    fn loadDialogueScripts(bundle: *const project.ProjectBundle) ![]dialogue.Script {
+        if (bundle.dialogues.len == 0) {
+            const scripts = try mem.permanent().alloc(dialogue.Script, 1);
+            var builder = dialogue.Builder.init(mem.permanent());
+            defer builder.deinit();
+            _ = builder.done();
+            scripts[0] = try builder.build();
+            return scripts;
+        }
+
+        const scripts = try mem.permanent().alloc(dialogue.Script, bundle.dialogues.len);
+        errdefer mem.permanent().free(scripts);
+        for (bundle.dialogues, 0..) |asset, i| {
+            scripts[i] = try dialogue.parseScriptJson(mem.permanent(), asset.source);
+        }
+        return scripts;
+    }
+
     pub fn deinit(self: *Self) void {
         if (!self.initialized) return;
 
@@ -214,10 +220,12 @@ pub const Engine = struct {
 
         self.gameState.manager.deinit();
         self.gameState.gameDialogue.deinit();
-        self.gameState.script.deinit();
+        for (self.gameState.dialogueScripts) |*script| script.deinit();
+        self.gameState.dialogueScripts = &.{};
 
         self.gameState.vnDialogue.deinit();
-        self.gameState.vnScript.deinit();
+        for (self.gameState.vnDialogueScripts) |*script| script.deinit();
+        self.gameState.vnDialogueScripts = &.{};
         self.gameState.eventQueue.deinit();
 
         for (self.textureEntries) |entry| {
@@ -496,6 +504,7 @@ fn explorationUpdate(_: *Mode, engine: *Engine, dt: f32) void {
     engine.gameState.manager.update(dt);
     engine.gameState.gameDialogue.update(dt);
 
+    const dialogue_was_active = engine.gameState.gameDialogue.isActive();
     dialogue.handleInput(&engine.gameState.gameDialogue);
 
     if (rl.isKeyPressed(.r)) {
@@ -504,7 +513,7 @@ fn explorationUpdate(_: *Mode, engine: *Engine, dt: f32) void {
     }
 
     const currentScene = engine.gameState.manager.currentScene();
-    const isPaused = engine.gameState.gameDialogue.isActive() or engine.gameState.manager.inputBlocked;
+    const isPaused = dialogue_was_active or engine.gameState.gameDialogue.isActive() or engine.gameState.manager.inputBlocked;
     currentScene.runSystems(dt, isPaused);
 }
 

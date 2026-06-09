@@ -107,10 +107,16 @@ function validateProject(vfs: Vfs, project: ProjectConfig): Diagnostic[] {
   }
 
   const dialogueNames = new Set<string>();
+  const dialogueLabels = new Map<string, Set<string>>();
   for (const dialogue of project.dialogues ?? []) {
     if (dialogueNames.has(dialogue.name)) out.push({ severity: 'error', path: 'game.json', message: `Duplicate dialogue '${dialogue.name}'` });
     dialogueNames.add(dialogue.name);
-    if (!vfs.has(normalizePath(dialogue.path))) out.push({ severity: 'error', path: dialogue.path, message: `Missing dialogue '${dialogue.name}'` });
+    if (!vfs.has(normalizePath(dialogue.path))) {
+      out.push({ severity: 'error', path: dialogue.path, message: `Missing dialogue '${dialogue.name}'` });
+    } else {
+      const parsed = parseDialogue(vfs, dialogue.path).dialogue;
+      if (parsed) dialogueLabels.set(dialogue.name, new Set(parsed.nodes.map((node) => node.id).filter(Boolean)));
+    }
   }
   if (project.combat?.path) {
     if (!vfs.has(normalizePath(project.combat.path))) {
@@ -151,7 +157,7 @@ function validateProject(vfs: Vfs, project: ProjectConfig): Diagnostic[] {
   for (const scene of scenes) {
     const parsed = parseScene(vfs, scene.path);
     if (!parsed.scene) continue;
-    for (const diagnostic of validateSceneReferences(vfs, scene.path, parsed.scene, sceneTargets, scenes, audioIds, encounterIds)) out.push(diagnostic);
+    for (const diagnostic of validateSceneReferences(vfs, scene.path, parsed.scene, sceneTargets, scenes, audioIds, encounterIds, dialogueNames, dialogueLabels)) out.push(diagnostic);
     for (const entity of parsed.scene.entities ?? []) {
       for (const ref of actionCombatRefs(entity.components?.Trigger)) referencedEncounters.add(ref.encounter);
       for (const ref of actionCombatRefs(entity.components?.Interactable)) referencedEncounters.add(ref.encounter);
@@ -261,7 +267,17 @@ function validateScene(path: string, scene: SceneDocument): Diagnostic[] {
   return out;
 }
 
-function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, sceneTargets: Set<string>, scenes: Array<{ name: string; path: string }>, audioIds: Set<string>, encounterIds: Set<string>): Diagnostic[] {
+function validateSceneReferences(
+  vfs: Vfs,
+  path: string,
+  scene: SceneDocument,
+  sceneTargets: Set<string>,
+  scenes: Array<{ name: string; path: string }>,
+  audioIds: Set<string>,
+  encounterIds: Set<string>,
+  dialogueIds: Set<string>,
+  dialogueLabels: Map<string, Set<string>>,
+): Diagnostic[] {
   const out: Diagnostic[] = [];
   const tags = new Set((scene.entities ?? []).map((entity) => entity.tag).filter(Boolean));
   const spawnPoints = new Set<string>();
@@ -303,6 +319,12 @@ function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, s
         out.push({ severity: 'error', path, message: `entities[${index}] starts missing encounter '${ref.encounter}'` });
       }
     }
+    for (const ref of actionDialogueRefs(entity.components?.Trigger)) {
+      validateDialogueActionRef(out, path, `entities[${index}].Trigger`, ref, dialogueIds, dialogueLabels);
+    }
+    for (const ref of actionDialogueRefs(entity.components?.Interactable)) {
+      validateDialogueActionRef(out, path, `entities[${index}].Interactable`, ref, dialogueIds, dialogueLabels);
+    }
 
     const portal = record(entity.components?.Portal);
     if (portal) {
@@ -315,6 +337,28 @@ function validateSceneReferences(vfs: Vfs, path: string, scene: SceneDocument, s
     }
   }
   return out;
+}
+
+function validateDialogueActionRef(
+  out: Diagnostic[],
+  path: string,
+  prefix: string,
+  ref: { id?: string; label?: string },
+  dialogueIds: Set<string>,
+  dialogueLabels: Map<string, Set<string>>,
+) {
+  if (dialogueIds.size === 0) {
+    out.push({ severity: 'error', path, message: `${prefix} starts dialogue but no dialogues are declared` });
+    return;
+  }
+  const id = ref.id || [...dialogueIds][0];
+  if (!dialogueIds.has(id)) {
+    out.push({ severity: 'error', path, message: `${prefix} starts missing dialogue '${id}'` });
+    return;
+  }
+  if (ref.label && !dialogueLabels.get(id)?.has(ref.label)) {
+    out.push({ severity: 'error', path, message: `${prefix} starts dialogue '${id}' at missing node '${ref.label}'` });
+  }
 }
 
 function validateCombat(path: string, combat: CombatDocument): Diagnostic[] {
@@ -545,6 +589,17 @@ function actionCombatRefs(component: unknown): Array<{ encounter: string }> {
   return actionsFromCarrier(component).flatMap((action) => {
     const startCombat = record(record(action)?.startCombat);
     return typeof startCombat?.encounter === 'string' ? [{ encounter: startCombat.encounter }] : [];
+  });
+}
+
+function actionDialogueRefs(component: unknown): Array<{ id?: string; label?: string }> {
+  return actionsFromCarrier(component).flatMap((action) => {
+    const startDialogue = record(record(action)?.startDialogue);
+    if (!startDialogue) return [];
+    return [{
+      id: typeof startDialogue.id === 'string' && startDialogue.id.length > 0 ? startDialogue.id : undefined,
+      label: typeof startDialogue.label === 'string' && startDialogue.label.length > 0 ? startDialogue.label : undefined,
+    }];
   });
 }
 

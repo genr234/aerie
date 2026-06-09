@@ -25,6 +25,7 @@
     panelCollapsed,
     inspectorCollapsed,
     currentScreen,
+    previewRunning,
   } from "./lib/stores";
 
   function togglePanel() {
@@ -48,6 +49,9 @@
     let unlisten: (() => void) | undefined;
     void listenPreviewLogs((log) => {
       output.update((o) => [...o.slice(-300), log]);
+      if (log.line.startsWith("[preview] exited")) {
+        previewRunning.set(false);
+      }
       const problem = problemFromPreviewLog(log);
       if (problem) {
         runtimeProblems.update((items) => [...items, problem].slice(-100));

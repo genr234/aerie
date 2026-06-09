@@ -98,7 +98,7 @@
       <span>Assets</span>
       <input
         type="file"
-        accept="image/png,image/jpeg"
+        accept="image/png,image/jpeg,audio/wav,audio/ogg,audio/mpeg,.wav,.ogg,.mp3"
         multiple
         on:change={importAssets}
       />
