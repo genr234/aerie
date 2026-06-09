@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aerie Game</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      background: #0d0f12;
+      color: #d8ddd7;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #0d0f12;
+    }
+
+    body {
+      display: grid;
+      place-items: center;
+    }
+
+    #game-frame {
+      position: relative;
+      display: grid;
+      place-items: center;
+      width: 100vw;
+      height: 100vh;
+      background: #0d0f12;
+    }
+
+    canvas.emscripten {
+      display: block;
+      width: min(100vw, calc(100vh * 16 / 9));
+      height: min(100vh, calc(100vw * 9 / 16));
+      max-width: 100vw;
+      max-height: 100vh;
+      border: 0;
+      outline: 0;
+      background: #0b0c0e;
+      image-rendering: auto;
+    }
+
+    #status {
+      position: fixed;
+      left: 16px;
+      bottom: 14px;
+      max-width: min(460px, calc(100vw - 32px));
+      margin: 0;
+      color: rgba(216, 221, 215, 0.7);
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+    }
+
+    #status:empty {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main id="game-frame">
+    <canvas class="emscripten" id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  </main>
+  <p id="status">Loading...</p>
+  <script>
+    const statusElement = document.getElementById("status");
+    const canvas = document.getElementById("canvas");
+
+    function setStatus(text) {
+      if (!statusElement) return;
+      statusElement.textContent = text || "";
+    }
+
+    var Module = {
+      print(text) {
+        console.log(text);
+      },
+      printErr(text) {
+        console.error(text);
+        setStatus(text);
+      },
+      canvas,
+      setStatus,
+      totalDependencies: 0,
+      monitorRunDependencies(left) {
+        this.totalDependencies = Math.max(this.totalDependencies, left);
+        if (left) setStatus("Loading...");
+        else setStatus("");
+      },
+    };
+
+    window.onerror = function(message) {
+      setStatus(String(message));
+    };
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

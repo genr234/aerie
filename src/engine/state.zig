@@ -11,7 +11,7 @@ pub const GameState = struct {
     sceneBuilder: *scenes.Builder,
 
     gameDialogue: dialogue.Runner,
-    playerTexture: rl.Texture2D,
+    playerTexture: ?rl.Texture2D = null,
     script: dialogue.Script,
     isTransitioning: bool = false,
 

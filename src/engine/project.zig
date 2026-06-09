@@ -235,6 +235,10 @@ fn loadProjectBundleFromProviderWithFallbackScripts(
 }
 
 fn loadScriptModulesFromFs(allocator: std.mem.Allocator, project_root: []const u8) ![]ScriptModule {
+    if (comptime @import("builtin").os.tag == .emscripten) {
+        return allocator.dupe(ScriptModule, &.{});
+    }
+
     const scripts_root = try std.fs.path.join(allocator, &.{ project_root, "assets", "scripts" });
     defer allocator.free(scripts_root);
 

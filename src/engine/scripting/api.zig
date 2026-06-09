@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const log = @import("../log.zig");
 const dialogue = @import("../dialogue.zig");
@@ -126,6 +127,9 @@ pub const Api = struct {
     }
 
     pub fn writeSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        if (comptime builtin.os.tag == .emscripten) {
+            return false;
+        }
         return writeSaveSlot(ctx, slot) catch |err| blk: {
             log.debug("[save] write '{s}' failed: {any}\n", .{ slot, err });
             break :blk false;
@@ -133,6 +137,9 @@ pub const Api = struct {
     }
 
     pub fn loadSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        if (comptime builtin.os.tag == .emscripten) {
+            return false;
+        }
         return loadSaveSlot(ctx, slot) catch |err| blk: {
             log.debug("[save] load '{s}' failed: {any}\n", .{ slot, err });
             break :blk false;
@@ -140,6 +147,9 @@ pub const Api = struct {
     }
 
     pub fn saveExists(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        if (comptime builtin.os.tag == .emscripten) {
+            return false;
+        }
         const path = saveSlotPath(ctx.projectRoot, slot) catch return false;
         defer std.heap.page_allocator.free(path);
         const io = std.Io.Threaded.global_single_threaded.io();
@@ -147,6 +157,9 @@ pub const Api = struct {
     }
 
     pub fn clearSave(ctx: *context.ScriptingContext, slot: []const u8) bool {
+        if (comptime builtin.os.tag == .emscripten) {
+            return false;
+        }
         const path = saveSlotPath(ctx.projectRoot, slot) catch return false;
         defer std.heap.page_allocator.free(path);
         const io = std.Io.Threaded.global_single_threaded.io();
@@ -476,6 +489,9 @@ pub const Api = struct {
     }
 
     fn writeSaveSlot(ctx: *context.ScriptingContext, slot: []const u8) !bool {
+        if (comptime builtin.os.tag == .emscripten) {
+            return false;
+        }
         const allocator = std.heap.page_allocator;
         const path = try saveSlotPath(ctx.projectRoot, slot);
         defer allocator.free(path);
@@ -587,6 +603,9 @@ pub const Api = struct {
     }
 
     fn makeDirIfMissing(path: []const u8) !void {
+        if (comptime builtin.os.tag == .emscripten) {
+            return error.MakeDirFailed;
+        }
         const zpath = try std.heap.page_allocator.dupeZ(u8, path);
         defer std.heap.page_allocator.free(zpath);
         const result = c_mkdir(zpath.ptr, 0o755);

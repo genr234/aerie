@@ -83,7 +83,7 @@ fn save_project_folder(request: ProjectFolderRequest) -> Result<String, String> 
 }
 
 #[tauri::command]
-fn export_web_bundle(request: ExportWebRequest) -> Result<String, String> {
+fn export_web_bundle(app: tauri::AppHandle, request: ExportWebRequest) -> Result<String, String> {
     let destination = PathBuf::from(request.destination);
     if destination.exists() {
         if !destination.is_dir() {
@@ -100,8 +100,12 @@ fn export_web_bundle(request: ExportWebRequest) -> Result<String, String> {
         }
     }
     fs::create_dir_all(&destination).map_err(to_string)?;
-    write_files_to_dir(&destination, request.files)?;
-    copy_static_web_runner(&destination)?;
+    let project_dir = tempfile::Builder::new()
+        .prefix("game-engine-web-export-")
+        .tempdir()
+        .map_err(to_string)?;
+    write_files_to_dir(project_dir.path(), request.files)?;
+    build_wasm_web_export(&app, project_dir.path(), &destination)?;
     write_web_export_readme(&destination)?;
 
     Ok(format!("Exported web game to {}.", destination.display()))
@@ -243,10 +247,6 @@ fn write_web_export_readme(destination: &Path) -> Result<(), String> {
     fs::write(destination.join("README.html"), readme).map_err(to_string)
 }
 
-fn copy_static_web_runner(destination: &Path) -> Result<u64, String> {
-    fs::copy("index.html", destination.join("index.html")).map_err(to_string)
-}
-
 fn stream_preview_output<R>(app: tauri::AppHandle, stream: &'static str, reader: R)
 where
     R: std::io::Read + Send + 'static,
@@ -352,13 +352,140 @@ fn resolve_engine_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn repo_engine_path() -> Result<PathBuf, String> {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    Ok(manifest_dir
-        .parent()
-        .ok_or_else(|| "failed to resolve repository root".to_string())?
+    Ok(repo_root()?
         .join("zig-out")
         .join("bin")
         .join(engine_binary_name()))
+}
+
+fn repo_root() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "failed to resolve repository root".to_string())
+}
+
+fn build_wasm_web_export(
+    app: &tauri::AppHandle,
+    project_root: &Path,
+    destination: &Path,
+) -> Result<(), String> {
+    let repo = resolve_engine_source_root(app)?;
+    let build_dir = tempfile::Builder::new()
+        .prefix("game-engine-wasm-build-")
+        .tempdir()
+        .map_err(to_string)?;
+    let prefix = build_dir.path().join("out");
+    let zig = resolve_zig_path(app, &repo)?;
+
+    let output = Command::new(&zig)
+        .current_dir(&repo)
+        .arg("build")
+        .arg("-Dtarget=wasm32-emscripten")
+        .arg("-Doptimize=ReleaseSmall")
+        .arg(format!("-Dproject-root={}", project_root.display()))
+        .arg("--prefix")
+        .arg(&prefix)
+        .output()
+        .map_err(|error| format!("failed to launch {}: {error}", zig.display()))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "WASM web build failed.\n\nstdout:\n{}\n\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+
+    let web_dir = prefix.join("web");
+    if !web_dir.is_dir() {
+        return Err(format!(
+            "WASM web build did not produce expected folder: {}",
+            web_dir.display()
+        ));
+    }
+
+    copy_dir_contents(&web_dir, destination)?;
+    promote_engine_html(destination)
+}
+
+fn resolve_zig_path(app: &tauri::AppHandle, repo: &Path) -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("ZIG") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "WASM export needs Zig, but ZIG points to a missing file: {}",
+            path.display()
+        ));
+    }
+
+    let bundled = repo
+        .join(".tools")
+        .join("zig-aarch64-macos-0.16.0")
+        .join("zig");
+    if bundled.exists() {
+        return Ok(bundled);
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let resource_zig = resource_dir.join("zig-aarch64-macos-0.16.0").join("zig");
+        if resource_zig.exists() {
+            return Ok(resource_zig);
+        }
+    }
+
+    Err(
+        "WASM export needs the Zig 0.16 toolchain because project assets are baked into the browser build. Set ZIG to a Zig binary, keep .tools/zig-aarch64-macos-0.16.0 next to the source tree, or use an app build that includes the Zig resource."
+            .to_string(),
+    )
+}
+
+fn resolve_engine_source_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let repo = repo_root()?;
+    if repo.join("build.zig").exists() && repo.join("src").is_dir() {
+        return Ok(repo);
+    }
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        if resource_dir.join("build.zig").exists() && resource_dir.join("src").is_dir() {
+            return Ok(resource_dir);
+        }
+    }
+
+    Err("WASM export needs the engine source files. This app package does not include build.zig and src/ as resources.".to_string())
+}
+
+fn copy_dir_contents(from: &Path, to: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(from).map_err(to_string)? {
+        let entry = entry.map_err(to_string)?;
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            fs::create_dir_all(&target).map_err(to_string)?;
+            copy_dir_contents(&source, &target)?;
+        } else if source.is_file() {
+            fs::copy(&source, &target).map_err(to_string)?;
+        }
+    }
+    Ok(())
+}
+
+fn promote_engine_html(destination: &Path) -> Result<(), String> {
+    let engine_html = destination.join("game_engine.html");
+    let index_html = destination.join("index.html");
+    if engine_html.exists() {
+        fs::rename(&engine_html, &index_html).map_err(to_string)?;
+    }
+    if !index_html.exists() {
+        return Err(format!(
+            "WASM web build did not produce index.html or game_engine.html in {}",
+            destination.display()
+        ));
+    }
+    Ok(())
 }
 
 fn engine_binary_name() -> &'static str {
@@ -390,4 +517,30 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promotes_engine_html_to_index() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("game_engine.html"), "<html>wasm</html>").unwrap();
+
+        promote_engine_html(temp.path()).unwrap();
+
+        let html = fs::read_to_string(temp.path().join("index.html")).unwrap();
+        assert!(html.contains("wasm"));
+        assert!(!temp.path().join("game_engine.html").exists());
+    }
+
+    #[test]
+    fn safe_relative_path_rejects_parent_traversal() {
+        assert!(safe_relative_path("../game.json").is_err());
+        assert_eq!(
+            safe_relative_path("./assets\\scenes/start.json").unwrap(),
+            PathBuf::from("assets").join("scenes").join("start.json")
+        );
+    }
 }

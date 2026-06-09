@@ -12,20 +12,24 @@ fn gameLoop() callconv(.c) void {
     engine.draw();
 }
 
-pub fn main(init_ctx: std.process.Init) !void {
+pub fn main(init_ctx: std.process.Init.Minimal) void {
     var project_root: []const u8 = ".";
 
-    if (builtin.os.tag != .emscripten) {
-        const args = try init_ctx.minimal.args.toSlice(init_ctx.arena.allocator());
-        if (args.len > 1) {
-            project_root = args[1];
+    if (comptime builtin.os.tag != .emscripten) {
+        var args = std.process.Args.Iterator.initAllocator(init_ctx.args, std.heap.page_allocator) catch return;
+        defer args.deinit();
+        _ = args.skip();
+        if (args.next()) |arg| {
+            project_root = arg;
         }
     }
 
     engine_mod.rl.setExitKey(engine_mod.rl.KeyboardKey.f4);
     engine.init(project_root) catch |err| {
-        std.debug.print("[runtime] engine init failed for '{s}': {any}\n", .{ project_root, err });
-        return err;
+        if (comptime builtin.os.tag != .emscripten) {
+            std.debug.print("[runtime] engine init failed for '{s}': {any}\n", .{ project_root, err });
+        }
+        return;
     };
     defer engine.deinit();
 

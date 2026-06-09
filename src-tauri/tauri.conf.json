@@ -26,6 +26,13 @@
   "bundle": {
     "active": true,
     "targets": ["app"],
-    "resources": ["../zig-out/bin/game_engine"]
+    "resources": [
+      "../zig-out/bin/game_engine",
+      "../build.zig",
+      "../build.zig.zon",
+      "../src",
+      "../web",
+      "../.tools/zig-aarch64-macos-0.16.0"
+    ]
   }
 }

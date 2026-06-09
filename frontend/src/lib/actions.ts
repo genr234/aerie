@@ -479,7 +479,7 @@ export async function createNewProject() {
   }
 }
 
-function createBlankProject(id: string, title: string): Vfs {
+export function createBlankProject(id: string, title: string): Vfs {
   let next: Vfs = new Map();
   const scene: SceneDocument = {
     name: "start",
@@ -509,7 +509,7 @@ function createBlankProject(id: string, title: string): Vfs {
 
   next = writeText(next, "game.json", `${JSON.stringify(projectConfig, null, 2)}\n`);
   next = writeText(next, "assets/scenes/start.json", writeScene(scene));
-  next = writeText(next, "assets/scripts/main.wren", "class Game {\n  static init() {}\n  static update(dt) {}\n}\n");
+  next = writeText(next, "assets/scripts/main.wren", "import \"engine/api\" for Events\n\nclass Game {\n  static onBoot() {\n    Events.message(\"Welcome to your new game.\", 2)\n  }\n\n  static onUpdate(dt) {}\n}\n");
   return next;
 }
 

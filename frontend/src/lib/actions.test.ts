@@ -1,6 +1,6 @@
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it } from "vitest";
-import { openLoadedProject } from "./actions";
+import { createBlankProject, openLoadedProject } from "./actions";
 import {
   activeMainTab,
   currentScreen,
@@ -11,7 +11,7 @@ import {
   undoStack,
   vfs,
 } from "./stores";
-import { writeText } from "./vfs";
+import { readText, writeText } from "./vfs";
 import type { Vfs } from "./types";
 
 function validProjectVfs(): Vfs {
@@ -89,5 +89,18 @@ describe("openLoadedProject", () => {
     });
 
     expect(get(dirty)).toEqual(new Set(loadedVfs.keys()));
+  });
+});
+
+describe("createBlankProject", () => {
+  it("creates a playable Wren entry script with runtime hook names", () => {
+    const created = createBlankProject("new-game", "New Game");
+    const script = readText(created, "assets/scripts/main.wren") ?? "";
+
+    expect(script).toContain('import "engine/api" for Events');
+    expect(script).toContain("static onBoot()");
+    expect(script).toContain("static onUpdate(dt)");
+    expect(script).not.toContain("static init()");
+    expect(script).not.toContain("static update(dt)");
   });
 });

@@ -137,8 +137,7 @@ pub const Engine = struct {
 
         self.textureEntries = try loadSceneTextures(bundle, scene_irs);
         const textures = sceneio_instantiate.TextureTable{ .entries = self.textureEntries };
-        if (self.textureEntries.len == 0) return error.MissingTexture;
-        self.gameState.playerTexture = if (textures.get("player.png")) |tex| tex else self.textureEntries[0].texture;
+        self.gameState.playerTexture = if (textures.get("player.png")) |tex| tex else if (self.textureEntries.len > 0) self.textureEntries[0].texture else null;
 
         const dialogue_bindings = sceneio_instantiate.DialogueBindings{
             .game = @ptrCast(&self.gameState.gameDialogue),
